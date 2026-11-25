@@ -1,4 +1,4 @@
-"""美股行情：Yahoo Finance 图表接口、本地缓存、CSV 导入。"""
+"""行情：美股走 Yahoo Finance，A 股走腾讯 / 东方财富，另支持本地 CSV。"""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ class DataError(Exception):
 def validate_symbol(symbol: str) -> str:
     raw = (symbol or "").strip().upper()
     if not raw or len(raw) > 15:
-        raise DataError("请输入有效的美股代码，例如 NVDA。")
+        raise DataError("请输入代码，例如 NVDA 或 600519。")
     allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-^")
     if any(ch not in allowed for ch in raw):
         raise DataError("代码只允许字母、数字、点、连字符。")
@@ -343,7 +343,12 @@ def get_bars(symbol: str, interval: str, start: str, end: str) -> dict:
         return _finalize(cached, clamp_warning, start_dt, end_dt)
 
     try:
-        fresh = fetch_yahoo(symbol, interval, start_dt, end_dt)
+        if _is_cn(symbol):
+            from simtrader.cn import fetch_cn_bars
+
+            fresh = fetch_cn_bars(symbol, interval, start_dt, end_dt)
+        else:
+            fresh = fetch_yahoo(symbol, interval, start_dt, end_dt)
     except DataError as exc:
         if cached is not None:
             cached["cached"] = True
@@ -359,16 +364,52 @@ def get_bars(symbol: str, interval: str, start: str, end: str) -> dict:
                 return _finalize(imported, warning, start_dt, end_dt)
         raise
 
-    fresh["warning"] = clamp_warning
+    fresh["warning"] = _join_warning(clamp_warning, fresh.get("warning"))
     fresh["cached"] = False
     _write_cache(path, fresh)
     return _finalize(fresh, clamp_warning, start_dt, end_dt)
 
 
-def search_symbols(query: str, limit: int = 8) -> list[dict]:
+def _is_cn(symbol: str) -> bool:
+    from simtrader.cn import is_cn_symbol
+
+    return is_cn_symbol(symbol)
+
+
+def _looks_cn_query(text: str) -> bool:
+    if any("\u4e00" <= ch <= "\u9fff" for ch in text):
+        return True
+    compact = text.strip().upper().replace(".", "")
+    return _is_cn(text) or (compact.isdigit() and len(compact) == 6)
+
+
+def search_symbols(query: str, market: str = "", limit: int = 8) -> list[dict]:
     text = (query or "").strip()
     if not text:
         return []
+    market = (market or "").lower()
+    found = []
+    errors = []
+    if market == "cn" or _looks_cn_query(text):
+        try:
+            from simtrader.cn import search_cn
+
+            found.extend(search_cn(text, limit))
+        except DataError as exc:
+            errors.append(exc)
+    if market != "cn" and len(found) < limit:
+        try:
+            found.extend(_search_yahoo(text, limit - len(found)))
+        except DataError as exc:
+            errors.append(exc)
+    if found:
+        return found[:limit]
+    if errors:
+        raise errors[0]
+    return []
+
+
+def _search_yahoo(text: str, limit: int) -> list[dict]:
     url = "https://query2.finance.yahoo.com/v1/finance/search?" + urllib.parse.urlencode(
         {"q": text, "quotesCount": max(limit * 3, 10), "newsCount": 0}
     )
@@ -401,6 +442,10 @@ def search_symbols(query: str, limit: int = 8) -> list[dict]:
 
 def get_quote(symbol: str) -> dict:
     symbol = validate_symbol(symbol)
+    if _is_cn(symbol):
+        from simtrader.cn import quote_cn
+
+        return quote_cn(symbol)
     end = datetime.now(NY)
     start = end - timedelta(days=12)
     last_error: Exception | None = None

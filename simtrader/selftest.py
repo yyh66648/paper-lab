@@ -136,6 +136,16 @@ def test_split_and_annualization():
     check(report["out_of_sample"]["total_return"] < 0, "后半段应是亏损")
 
 
+def test_cn_symbols():
+    from simtrader.cn import canonical_symbol, is_cn_symbol, tencent_symbol
+
+    check(is_cn_symbol("600519") and not is_cn_symbol("NVDA"), "A 股代码识别错误")
+    check(canonical_symbol("600519") == "600519.SH", canonical_symbol("600519"))
+    check(canonical_symbol("sz000001") == "000001.SZ", canonical_symbol("sz000001"))
+    check(tencent_symbol("000300") == "sh000300", tencent_symbol("000300"))
+    check(canonical_symbol("300750") == "300750.SZ", canonical_symbol("300750"))
+
+
 def test_indicators_and_plugins():
     check(sma_series([1, 2, 3, 4], 2) == [None, 1.5, 2.5, 3.5], "SMA 序列不正确")
     classes, warnings = strategy_catalog()
@@ -155,6 +165,7 @@ def run_all() -> None:
         test_round_trip_includes_fees,
         test_penny_buy_stays_solvent,
         test_split_and_annualization,
+        test_cn_symbols,
         test_indicators_and_plugins,
     ]
     for test in tests:

@@ -57,8 +57,8 @@ def parse_run_spec(body: dict) -> dict:
     if not start or not end:
         raise DataError("请选择开始和结束日期。")
     benchmark = body.get("benchmark") or "self"
-    if benchmark not in ("self", "SPY", "QQQ", "none"):
-        raise DataError("基准只能是自身、SPY、QQQ，或不对比。")
+    if benchmark not in ("self", "SPY", "QQQ", "510300.SH", "none"):
+        raise DataError("基准只能是自身、SPY、QQQ、沪深300ETF，或不对比。")
     strategy_id = (body.get("strategy") or "").strip()
     if not strategy_id:
         raise DataError("请选择一个策略。")
@@ -422,7 +422,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/health":
             self._json({"ok": True, "name": "纸面实验室", "version": __version__})
         elif parsed.path == "/api/search":
-            self._json({"results": search_symbols(one("q"))})
+            self._json({"results": search_symbols(one("q"), one("market"))})
         elif parsed.path == "/api/quote":
             self._json(get_quote(one("symbol")))
         elif parsed.path == "/api/bars":

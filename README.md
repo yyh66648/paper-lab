@@ -43,7 +43,7 @@ python run.py --selftest
 
 ## 行情从哪来
 
-优先用 Yahoo Finance 的图表接口，结果缓存在 `data/cache`。这是非官方接口，可能延迟、缺失，或某一天连不上。
+美股优先用 Yahoo Finance。A 股日K、周K用腾讯前复权，分钟线也用腾讯，名称搜索用东方财富。代码可以写 `600519` 或 `600519.SH`。这些都是非官方接口，可能延迟或缺失，结果缓存在 `data/cache`。
 
 连不上时，如果 `data/imports/NVDA.csv` 存在，日 K 会改用这个文件。表头：
 

@@ -27,9 +27,13 @@
 
   <div class="shell">
     <aside class="panel left">
+      <div class="seg" id="markets">
+        <button type="button" data-market="us" class="on">美股</button>
+        <button type="button" data-market="cn">A股</button>
+      </div>
       <label class="field-label">标的</label>
       <div class="search">
-        <input id="symbolInput" type="text" spellcheck="false" placeholder="代码或公司，如 NVDA" autocomplete="off" />
+        <input id="symbolInput" type="text" spellcheck="false" placeholder="代码或名称，如 NVDA / 茅台" autocomplete="off" />
         <button id="searchBtn" type="button">搜索</button>
       </div>
       <div id="searchResults" class="search-results" hidden></div>
@@ -115,6 +119,7 @@
               <option value="self">同一标的买入持有</option>
               <option value="SPY">标普 SPY</option>
               <option value="QQQ">纳指 QQQ</option>
+              <option value="510300.SH">沪深300ETF</option>
               <option value="none">不对比</option>
             </select>
           </label>

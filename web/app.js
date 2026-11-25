@@ -1,9 +1,13 @@
 const $ = (id) => document.getElementById(id);
-const WATCH = ["NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "AMD", "SPY", "QQQ"];
+const WATCH = {
+  us: ["NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "AMD", "SPY", "QQQ"],
+  cn: ["600519.SH", "000001.SZ", "300750.SZ", "601318.SH", "000858.SZ", "002594.SZ", "510300.SH", "510050.SH", "159915.SZ"],
+};
 const PIN_COLORS = ["#c58bd0", "#8fce8f", "#e0a38a", "#8fd0d0", "#e6d38a"];
 
 const state = {
   symbol: "NVDA",
+  market: "us",
   interval: "1d",
   bars: [],
   meta: {},
@@ -22,14 +26,13 @@ const fmt = {
     const digits = Math.abs(n) >= 1 ? 2 : 4;
     return n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   },
-  usd(n) {
+  money(n, currency = "USD", digits = 2) {
     if (!Number.isFinite(n)) return "—";
-    return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+    const prefix = currency === "CNY" ? "¥" : "$";
+    return prefix + n.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
   },
-  usd2(n) {
-    if (!Number.isFinite(n)) return "—";
-    return n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  },
+  usd(n) { return fmt.money(n, "USD", 0); },
+  usd2(n) { return fmt.money(n, "USD", 2); },
   pct(n) {
     if (!Number.isFinite(n)) return "—";
     return (n > 0 ? "+" : "") + (n * 100).toFixed(2) + "%";
@@ -107,6 +110,7 @@ function assumptions() {
 function saveSettings() {
   const settings = {
     symbol: state.symbol,
+    market: state.market,
     interval: state.interval,
     start: $("startDate").value,
     end: $("endDate").value,
@@ -125,10 +129,16 @@ function loadSettings() {
   }
 }
 
+function currency() {
+  return state.result?.currency || state.meta?.currency || state.quote?.currency || (state.market === "cn" ? "CNY" : "USD");
+}
+
 function renderWatch() {
-  $("watchlist").innerHTML = WATCH.map(
-    (symbol) => `<button type="button" data-symbol="${symbol}" class="${symbol === state.symbol ? "on" : ""}">${symbol}</button>`
+  const list = WATCH[state.market] || WATCH.us;
+  $("watchlist").innerHTML = list.map(
+    (symbol) => `<button type="button" data-symbol="${symbol}" class="${symbol === state.symbol ? "on" : ""}">${symbol.replace(".SH", "").replace(".SZ", "")}</button>`
   ).join("");
+  [...$("markets").children].forEach((item) => item.classList.toggle("on", item.dataset.market === state.market));
 }
 
 function renderQuote() {
@@ -144,7 +154,7 @@ function renderQuote() {
   const name = quote?.name || meta.name || "";
   strip.innerHTML = `
     <span class="sym">${meta.symbol || quote.symbol}</span>
-    <span class="px num ${tone(change)}">${fmt.px(price)}</span>
+    <span class="px num ${tone(change)}">${fmt.money(price, quote?.currency || currency(), Math.abs(price) >= 100 ? 2 : 2)}</span>
     <span class="num ${tone(change)}">${fmt.pct(change)}</span>
     <span class="name">${name}${quote?.exchange ? " · " + quote.exchange : ""}</span>`;
   $("dataSource").textContent = meta.source ? `${meta.source}${meta.adjusted ? " · 复权" : ""}` : "行情未连接";
@@ -580,7 +590,7 @@ function renderMetrics() {
     ["胜率", fmt.pct(m.win_rate), null],
     ["盈亏因子", fmt.num(m.profit_factor), null],
     ["交易次数", m.open_trades ? `${m.trades}+${m.open_trades}` : String(m.trades ?? "—"), null],
-    ["期末权益", fmt.usd(m.ending_equity), m.total_return],
+    ["期末权益", fmt.money(m.ending_equity, currency(), 0), m.total_return],
   ];
   const bench = result.benchmark?.metrics;
   const excess = bench && Number.isFinite(m.total_return) && Number.isFinite(bench.total_return)
@@ -595,7 +605,7 @@ function renderMetrics() {
   const excessText = excess == null ? "" : `相对基准 ${fmt.pct(excess)}。`;
   box.innerHTML = tiles
     .map(([label, value, signed]) => `<div class="tile"><span>${label}</span><strong class="num ${signed == null ? "" : tone(signed)}">${value}</strong></div>`)
-    .join("") + `<p class="sentence">${bench ? `${result.benchmark.label} ${fmt.pct(bench.total_return)}，回撤 ${fmt.pct(bench.max_drawdown)}。` : ""}${excessText}${splitText}波动 ${fmt.pct(m.volatility)}，索提诺 ${fmt.num(m.sortino)}，卡玛 ${fmt.num(m.calmar)}，持仓 ${fmt.pct(m.exposure)}，均持 ${fmt.num(m.avg_hold_bars, 0)} 根，结束 ${position} 股（${weight}），费用 ${fmt.usd2(m.fees)}。</p>`;
+    .join("") + `<p class="sentence">${bench ? `${result.benchmark.label} ${fmt.pct(bench.total_return)}，回撤 ${fmt.pct(bench.max_drawdown)}。` : ""}${excessText}${splitText}波动 ${fmt.pct(m.volatility)}，索提诺 ${fmt.num(m.sortino)}，卡玛 ${fmt.num(m.calmar)}，持仓 ${fmt.pct(m.exposure)}，均持 ${fmt.num(m.avg_hold_bars, 0)} 根，结束 ${position} 股（${weight}），费用 ${fmt.money(m.fees, currency())}。</p>`;
 }
 
 function renderTrades() {
@@ -672,7 +682,7 @@ async function loadBars(autoRun = false) {
   $("loadBtn").disabled = true;
   try {
     const [bars, quote] = await Promise.all([
-      api(`/api/bars?symbol=${encodeURIComponent(symbol)}&interval=${state.interval}&start=${$("startDate").value}&end=${$("endDate").value}`),
+      api(`/api/bars?symbol=${encodeURIComponent(symbol)}&interval=${state.interval}&start=${$("startDate").value}&end=${$("endDate").value}&market=${state.market}`),
       api(`/api/quote?symbol=${encodeURIComponent(symbol)}`).catch(() => null),
     ]);
     state.meta = bars;
@@ -918,7 +928,7 @@ async function searchSymbols() {
     return;
   }
   try {
-    const data = await api("/api/search?q=" + encodeURIComponent(q));
+    const data = await api("/api/search?q=" + encodeURIComponent(q) + "&market=" + state.market);
     const box = $("searchResults");
     if (!data.results.length) {
       box.hidden = false;
@@ -950,6 +960,21 @@ function bind() {
     const button = event.target.closest("[data-symbol]");
     if (!button) return;
     $("symbolInput").value = button.dataset.symbol;
+    await loadBars(false);
+  };
+  $("markets").onclick = async (event) => {
+    const button = event.target.closest("[data-market]");
+    if (!button || button.dataset.market === state.market) return;
+    state.market = button.dataset.market;
+    const bench = $("benchmark").value;
+    if (state.market === "cn" && (bench === "SPY" || bench === "QQQ")) $("benchmark").value = "510300.SH";
+    if (state.market === "us" && bench === "510300.SH") $("benchmark").value = "SPY";
+    const first = (WATCH[state.market] || [])[0];
+    if (first) $("symbolInput").value = first;
+    $("dataHint").textContent = state.market === "cn"
+      ? "A 股日K是前复权。分钟线只有最近一段。"
+      : "图表用复权价，避免拆股被看成暴跌。";
+    renderWatch();
     await loadBars(false);
   };
   $("intervals").onclick = async (event) => {
@@ -1065,7 +1090,8 @@ async function init() {
   if (saved?.slippage_bps != null) $("slippage").value = saved.slippage_bps;
   if (saved?.allow_short) $("allowShort").checked = true;
   if (saved?.benchmark) $("benchmark").value = saved.benchmark;
-  state.symbol = (saved?.symbol || "NVDA").toUpperCase();
+  state.market = saved?.market === "cn" ? "cn" : "us";
+  state.symbol = (saved?.symbol || (state.market === "cn" ? "600519.SH" : "NVDA")).toUpperCase();
   state.interval = saved?.interval || "1d";
   $("symbolInput").value = state.symbol;
   [...$("intervals").children].forEach((item) => item.classList.toggle("on", item.dataset.interval === state.interval));
