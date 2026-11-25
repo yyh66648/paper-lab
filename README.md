@@ -1,10 +1,24 @@
 # 纸面实验室
 
-本地美股策略回测台。不需要券商账户，也不会下真实订单。
+美股和 A 股的策略回测台。不需要券商账户，也不会下真实订单。
 
-## 启动
+## 在线版
 
-在这个目录打开终端，运行：
+https://yyh66648.github.io/paper-lab/
+
+纯静态，回测全部在浏览器里算，不经过任何服务器。美股是每天预抓的复权快照（约 60 只常见股票和 ETF），A 股在页面上切过去后实时直连腾讯，可以查任意 6 位代码。
+
+## 本地跑
+
+静态版直接开 `docs/index.html` 能用，但要通过 HTTP 打开才读得到数据文件：
+
+```bat
+python -m http.server 8765 -d docs
+```
+
+然后打开 http://127.0.0.1:8765 。
+
+带 Python 后端的版本（任意美股代码、服务端回测、本地纸面账户）：
 
 ```bat
 python run.py
@@ -19,6 +33,22 @@ python run.py
 ```bat
 python run.py --selftest
 ```
+
+## 两种版本的差别
+
+| | 在线静态版 | 本地 Python 版 |
+|---|---|---|
+| 回测在哪算 | 浏览器（`docs/engine.js`） | 服务端（`simtrader/engine.py`） |
+| 美股范围 | 预抓的固定清单 | 任意代码 |
+| A 股 | 实时直连，任意代码 | 同样直连 |
+| 手动模拟账户 | 存在浏览器 localStorage | 存在 `data/paper_account.json` |
+| 自定义策略 | 需要改 `docs/engine.js` | 放进 `strategies_user/` 即可 |
+
+两个引擎的成交规则相同，我用同一份 NVDA 数据对比过，收益、回撤、夏普和成交笔数一致（`scripts/parity.js`）。
+
+## 行情怎么更新
+
+在线版的美股数据由 `.github/workflows/update-data.yml` 每个交易日跑一次，调用 `scripts/fetch_data.py` 抓 Yahoo 复权数据写进 `docs/data/`。也可以手动触发。
 
 ## 怎么用
 
