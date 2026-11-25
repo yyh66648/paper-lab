@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>纸面实验室 · 美股策略回测</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23111816'/%3E%3Cpath d='M3 12V8h2v4H3zm4 0V5h2v7H7zm4 0V3h2v9h-2z' fill='%23d6a25a'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <strong>纸面实验室</strong>
+        <em>Paper Lab</em>
+      </div>
+    </div>
+    <div class="quote-strip" id="quoteStrip">
+      <span class="quiet">选择一只美股，加载行情后即可回测。</span>
+    </div>
+    <div class="top-meta">
+      <span class="badge">本地模拟</span>
+      <span id="dataSource">行情未连接</span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="panel left">
+      <label class="field-label">标的</label>
+      <div class="search">
+        <input id="symbolInput" type="text" spellcheck="false" placeholder="代码或公司，如 NVDA" autocomplete="off" />
+        <button id="searchBtn" type="button">搜索</button>
+      </div>
+      <div id="searchResults" class="search-results" hidden></div>
+      <div id="watchlist" class="watch"></div>
+
+      <label class="field-label">周期</label>
+      <div class="seg" id="intervals">
+        <button type="button" data-interval="1d" class="on">日K</button>
+        <button type="button" data-interval="1wk">周K</button>
+        <button type="button" data-interval="1h">1小时</button>
+        <button type="button" data-interval="15m">15分</button>
+        <button type="button" data-interval="5m">5分</button>
+      </div>
+      <p class="hint">分钟线大约只能回溯 60 天，小时线大约 700 天。</p>
+
+      <label class="field-label">区间</label>
+      <div class="dates">
+        <input id="startDate" type="date" />
+        <span>至</span>
+        <input id="endDate" type="date" />
+      </div>
+      <div class="seg" id="ranges">
+        <button type="button" data-range="1">1年</button>
+        <button type="button" data-range="3" class="on">3年</button>
+        <button type="button" data-range="5">5年</button>
+        <button type="button" data-range="10">10年</button>
+      </div>
+      <button id="loadBtn" class="ghost wide" type="button">加载行情</button>
+      <p class="hint" id="dataHint">图表用复权价，避免拆股被看成暴跌。</p>
+    </aside>
+
+    <main class="center">
+      <div id="banner" class="banner" hidden></div>
+      <section class="chart-card">
+        <div class="chart-head">
+          <span id="chartTitle">价格</span>
+          <div class="chart-tools">
+            <div class="legend" id="priceLegend"></div>
+            <div class="seg tiny" id="zooms">
+              <button type="button" data-zoom="126">6个月</button>
+              <button type="button" data-zoom="252">1年</button>
+              <button type="button" data-zoom="all">全部</button>
+            </div>
+          </div>
+        </div>
+        <div class="canvas-box">
+          <canvas id="priceChart"></canvas>
+          <div id="priceTip" class="tip" hidden></div>
+        </div>
+      </section>
+      <section class="chart-card">
+        <div class="chart-head">
+          <span>净值 · 起点 = 100</span>
+          <div class="legend" id="equityLegend"></div>
+        </div>
+        <div class="canvas-box">
+          <canvas id="equityChart"></canvas>
+          <div id="equityTip" class="tip" hidden></div>
+        </div>
+      </section>
+    </main>
+
+    <aside class="panel right">
+      <div class="seg mode" id="modeTabs">
+        <button type="button" data-mode="backtest" class="on">策略回测</button>
+        <button type="button" data-mode="paper">手动模拟</button>
+      </div>
+
+      <div id="backtestPane">
+        <label class="field-label">策略</label>
+        <select id="strategySelect"></select>
+        <p class="strategy-desc" id="strategyDesc"></p>
+        <div id="paramForm" class="fields"></div>
+
+        <label class="field-label">账户假设</label>
+        <div class="fields">
+          <label>初始资金<input id="cash" type="number" min="1000" step="1000" value="100000" /></label>
+          <label>手续费 bps<input id="commission" type="number" min="0" max="100" step="0.5" value="1" /></label>
+          <label>滑点 bps<input id="slippage" type="number" min="0" max="200" step="1" value="5" /></label>
+          <label class="check"><input id="allowShort" type="checkbox" /> 允许做空</label>
+          <label>对比基准
+            <select id="benchmark">
+              <option value="self">同一标的买入持有</option>
+              <option value="SPY">标普 SPY</option>
+              <option value="QQQ">纳指 QQQ</option>
+              <option value="none">不对比</option>
+            </select>
+          </label>
+        </div>
+        <button id="runBtn" class="primary wide" type="button">运行回测</button>
+        <button id="pinBtn" class="ghost wide" type="button" disabled>加入对比</button>
+        <p class="hint">信号在收盘确认，下一根开盘成交。信号不变就不再平衡。默认不使用杠杆。1 bp = 0.01%。</p>
+      </div>
+
+      <div id="paperPane" hidden>
+        <p class="hint">按当前现价立即成交，用来手工记账。它和上面的回测不是同一套撮合。</p>
+        <div id="paperSummary" class="paper-summary"></div>
+        <div class="fields">
+          <label>股数<input id="paperQty" type="number" min="1" step="1" value="1" /></label>
+        </div>
+        <div class="pair">
+          <button id="paperBuy" class="primary" type="button">买入</button>
+          <button id="paperSell" class="danger" type="button">卖出</button>
+        </div>
+        <button id="paperReset" class="ghost wide" type="button">重置账户</button>
+        <div id="paperPositions"></div>
+        <div id="paperOrders"></div>
+      </div>
+    </aside>
+  </div>
+
+  <section class="blotter">
+    <div id="metrics" class="metrics">
+      <p class="empty">运行回测后，这里显示收益、回撤和胜率。</p>
+    </div>
+    <div class="blotter-tabs">
+      <button type="button" data-tab="trades" class="on">成交</button>
+      <button type="button" data-tab="compare">对比</button>
+      <button type="button" data-tab="sweep">参数扫描</button>
+      <div class="spacer"></div>
+      <button id="exportTrades" class="text" type="button">下载成交</button>
+      <button id="exportMetrics" class="text" type="button">下载绩效</button>
+    </div>
+    <div class="blotter-body">
+      <div id="tab-trades"></div>
+      <div id="tab-compare" hidden></div>
+      <div id="tab-sweep" hidden>
+        <div class="sweep-form">
+          <label>参数<select id="sweepParam"></select></label>
+          <label>最小<input id="sweepMin" type="number" /></label>
+          <label>最大<input id="sweepMax" type="number" /></label>
+          <label>步长<input id="sweepStep" type="number" /></label>
+          <button id="sweepBtn" class="primary" type="button">扫描</button>
+        </div>
+        <div id="sweepTable"></div>
+      </div>
+    </div>
+  </section>
+  <script src="/app.js"></script>
+</body>
+</html>
