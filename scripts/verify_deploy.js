@@ -3,10 +3,10 @@ const base = "https://yyh66648.github.io/paper-lab/";
 
 (async () => {
   const checks = [
-    ["app.js", ["stopLoss", "runRobust", "renderHeatmap", "applySweepMode"]],
-    ["engine.js", ["stopLossPct", "takeProfitPct", "止盈", "止损"]],
-    ["bridge.js", ["heatmap", "batch(", "stopLossPct"]],
-    ["index.html", ["stopLoss", "robustBtn", "sweepMode"]],
+    ["app.js", ["stopLoss", "runRobust", "renderHeatmap", "applySweepMode", "lotSize", "tPlusOne"]],
+    ["engine.js", ["stopLossPct", "takeProfitPct", "止盈", "止损", "tPlusOne", "lotSize", "lotSize"]],
+    ["bridge.js", ["heatmap", "batch(", "stopLossPct", "tPlusOne", "lot"]],
+    ["index.html", ["stopLoss", "robustBtn", "sweepMode", "lotSize", "tPlusOne"]],
   ];
   let bad = 0;
   for (const [file, needles] of checks) {
