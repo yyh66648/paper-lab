@@ -34,7 +34,7 @@ def summarize(initial: float, equity_rows: list[dict], trades: list[dict], fees:
             returns.append(equity / prev - 1.0)
         prev = equity
     volatility = sharpe = sortino = None
-    bars_per_year = BARS_PER_YEAR.get(interval, 252)
+    bars_per_year = infer_bars_per_year(times, interval, len(returns) or len(equities))
     if len(returns) >= 2:
         arr = np.asarray(returns, dtype=float)
         std = float(arr.std(ddof=1))
@@ -86,6 +86,58 @@ def summarize(initial: float, equity_rows: list[dict], trades: list[dict], fees:
         "ending_equity": ending,
         "ending_weight": ending_weight,
         "years": years,
+    }
+
+
+def infer_bars_per_year(times: list[int], interval: str, n_returns: int) -> float:
+    """用样本里真实的 K 线密度年化，而不是写死每天 7 根小时线。"""
+    fallback = BARS_PER_YEAR.get(interval, 252)
+    if len(times) < 2 or n_returns < 2:
+        return float(fallback)
+    years = (times[-1] - times[0]) / (365.25 * 86400)
+    if years < 5 / 365.25:
+        return float(fallback)
+    return max(1.0, n_returns / years)
+
+
+def window_summary(start_equity: float, rows: list[dict], interval: str) -> dict:
+    peak = float(start_equity)
+    shaped = []
+    for row in rows:
+        equity = float(row["equity"])
+        peak = max(peak, equity)
+        shaped.append(
+            {
+                "t": row["t"],
+                "equity": equity,
+                "drawdown": (equity / peak - 1.0) if peak else 0.0,
+                "position": row.get("position") or 0,
+                "close": row.get("close") or 0,
+            }
+        )
+    return summarize(start_equity, shaped, [], 0.0, interval)
+
+
+def split_report(initial: float, equity_rows: list[dict], interval: str, ratio: float = 0.7) -> dict | None:
+    count = len(equity_rows)
+    split = int(count * ratio)
+    if split < 20 or count - split < 20:
+        return None
+    earlier = equity_rows[:split]
+    later = equity_rows[split:]
+    later_start = float(earlier[-1]["equity"])
+    if later_start <= 0:
+        return None
+    keys = ("total_return", "cagr", "sharpe", "max_drawdown", "ending_equity", "volatility")
+
+    def brief(metrics: dict) -> dict:
+        return {key: metrics.get(key) for key in keys}
+
+    return {
+        "ratio": ratio,
+        "split_label": earlier[-1].get("label"),
+        "in_sample": brief(window_summary(initial, earlier, interval)),
+        "out_of_sample": brief(window_summary(later_start, later, interval)),
     }
 
 

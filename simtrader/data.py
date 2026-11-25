@@ -298,8 +298,9 @@ def _clamp_range(interval: str, start: datetime, end: datetime) -> tuple[datetim
 
 
 def _finalize(payload: dict, warning: str | None, start: datetime, end: datetime) -> dict:
-    start_ts = int(start.timestamp()) - 86400
-    end_ts = int(end.timestamp()) + 86400
+    # 只留请求区间内的 K 线。左右各留 6 小时，兼容时区取整，但不会把下一根交易日带进来。
+    start_ts = int(start.timestamp()) - 6 * 3600
+    end_ts = int(end.timestamp()) + 6 * 3600
     seen = set()
     bars = []
     for bar in payload.get("bars") or []:

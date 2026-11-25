@@ -12,9 +12,9 @@ from urllib.parse import parse_qs, urlparse
 from simtrader import __version__
 from simtrader.data import DataError, get_bars, get_quote, search_symbols, validate_interval, validate_symbol
 from simtrader.engine import EngineError, run_backtest
-from simtrader.metrics import equity_rows_from_values, summarize
+from simtrader.metrics import equity_rows_from_values, split_report, summarize
 from simtrader.paper import place_order, reset_account, snapshot
-from simtrader.strategies import create_strategy, describe_strategy, strategy_catalog
+from simtrader.strategies import BuyHold, create_strategy, describe_strategy, strategy_catalog
 
 ROOT_WEB = __import__("pathlib").Path(__file__).resolve().parent.parent / "web"
 
@@ -91,7 +91,13 @@ def _clean_overlays(strategy) -> list[dict]:
     return overlays
 
 
-def execute_backtest(spec: dict, bars: list[dict] | None = None, bench_bars: list[dict] | None = None, meta: dict | None = None) -> dict:
+def execute_backtest(
+    spec: dict,
+    bars: list[dict] | None = None,
+    bench_bars: list[dict] | None = None,
+    meta: dict | None = None,
+    detail: bool = True,
+) -> dict:
     started = time.perf_counter()
     if bars is None:
         meta = get_bars(spec["symbol"], spec["interval"], spec["start"], spec["end"])
@@ -161,8 +167,9 @@ def execute_backtest(spec: dict, bars: list[dict] | None = None, bench_bars: lis
         "equity": raw["equity"],
         "trades": raw["trades"],
         "markers": raw["markers"],
-        "overlays": _clean_overlays(strategy),
+        "overlays": _clean_overlays(strategy) if detail else [],
         "ending_signal": raw["ending_signal"],
+        "split": split_report(spec["cash"], raw["equity"], spec["interval"]) if detail else None,
         "strategy": {"id": strategy.id, "name": strategy.name, "params": strategy.params},
         "assumptions": {
             "cash": spec["cash"],
@@ -173,8 +180,14 @@ def execute_backtest(spec: dict, bars: list[dict] | None = None, bench_bars: lis
         },
         "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
     }
-    if meta is None:
-        payload.pop("bars")
+    if meta is None or not detail:
+        payload.pop("bars", None)
+    if not detail:
+        payload.pop("equity", None)
+        payload.pop("trades", None)
+        payload.pop("markers", None)
+        payload.pop("overlays", None)
+        payload.pop("split", None)
     return payload
 
 
@@ -220,7 +233,7 @@ def execute_sweep(body: dict) -> dict:
         trial = dict(spec)
         trial["params"] = params
         trial["benchmark"] = "none" if spec["benchmark"] == "none" else spec["benchmark"]
-        result = execute_backtest(trial, bars=meta["bars"], bench_bars=bench_bars, meta=meta)
+        result = execute_backtest(trial, bars=meta["bars"], bench_bars=bench_bars, meta=meta, detail=False)
         metrics = result["metrics"]
         rows.append({"value": value, "metrics": metrics})
         if metrics.get("sharpe") is not None and (best_sharpe is None or metrics["sharpe"] > best_sharpe["metrics"]["sharpe"]):
@@ -236,6 +249,109 @@ def execute_sweep(body: dict) -> dict:
         "best_sharpe": None if best_sharpe is None else best_sharpe["value"],
         "best_return": None if best_return is None else best_return["value"],
         "warning": meta.get("warning"),
+    }
+
+
+def _run_kwargs(spec: dict, allow_short: bool | None = None) -> dict:
+    return {
+        "cash": spec["cash"],
+        "commission_bps": spec["commission_bps"],
+        "slippage_bps": spec["slippage_bps"],
+        "allow_short": spec["allow_short"] if allow_short is None else allow_short,
+        "symbol": spec["symbol"],
+    }
+
+
+def execute_compare(body: dict) -> dict:
+    spec = parse_run_spec({**body, "strategy": body.get("strategy") or "buy_hold"})
+    started = time.perf_counter()
+    meta = get_bars(spec["symbol"], spec["interval"], spec["start"], spec["end"])
+    classes, load_warnings = strategy_catalog()
+    warnings = [item for item in [meta.get("warning"), *load_warnings] if item]
+    bench_bars = None
+    bench_symbol = spec["symbol"]
+    bench_label = f"买入持有 {spec['symbol']}"
+    if spec["benchmark"] in ("SPY", "QQQ"):
+        try:
+            bench_meta = get_bars(spec["benchmark"], spec["interval"], spec["start"], spec["end"])
+            bench_bars = bench_meta["bars"]
+            bench_symbol = spec["benchmark"]
+            bench_label = f"买入持有 {spec['benchmark']}"
+        except DataError as exc:
+            warnings.append(f"基准 {spec['benchmark']} 加载失败（{exc}），已改和自身买入持有对比。")
+    benchmark = None
+    if spec["benchmark"] != "none":
+        probe = run_backtest(
+            meta["bars"],
+            BuyHold(),
+            bench_bars=bench_bars if spec["benchmark"] in ("SPY", "QQQ") and bench_bars is not None else None,
+            include_benchmark=True,
+            **_run_kwargs(spec, allow_short=False),
+        )
+        if spec["benchmark"] in ("SPY", "QQQ") and bench_bars is not None:
+            bench_rows = equity_rows_from_values(probe["equity"], probe["bench_equity"], spec["cash"])
+            bench_fees = probe["bench_fees"]
+            bench_trades = []
+        else:
+            bench_rows = probe["equity"]
+            bench_fees = probe["fees"]
+            bench_trades = probe["trades"]
+            bench_symbol = spec["symbol"]
+            bench_label = f"买入持有 {spec['symbol']}"
+        benchmark = {
+            "symbol": bench_symbol,
+            "label": bench_label,
+            "metrics": summarize(spec["cash"], bench_rows, bench_trades, bench_fees, spec["interval"]),
+        }
+    rows = []
+    best_sharpe = None
+    best_return = None
+    best_sharpe_id = None
+    best_return_id = None
+    for cls in classes:
+        try:
+            strategy = cls({})
+            warning = strategy.validate()
+            raw = run_backtest(meta["bars"], strategy, include_benchmark=False, **_run_kwargs(spec))
+            metrics = summarize(spec["cash"], raw["equity"], raw["trades"], raw["fees"], spec["interval"])
+            metrics["ending_cash"] = raw["ending_cash"]
+            metrics["ending_position"] = raw["ending_position"]
+            row = {
+                "id": cls.id,
+                "name": cls.name,
+                "origin": "user" if getattr(cls, "origin", "") == "user" else "builtin",
+                "params": strategy.params,
+                "warning": warning,
+                "metrics": metrics,
+            }
+        except Exception as exc:
+            row = {
+                "id": cls.id,
+                "name": cls.name,
+                "origin": "user" if getattr(cls, "origin", "") == "user" else "builtin",
+                "params": {},
+                "error": str(exc),
+                "metrics": None,
+            }
+        rows.append(row)
+        metrics = row.get("metrics") or {}
+        if metrics.get("sharpe") is not None and (best_sharpe is None or metrics["sharpe"] > best_sharpe):
+            best_sharpe = metrics["sharpe"]
+            best_sharpe_id = row["id"]
+        if metrics.get("total_return") is not None and (best_return is None or metrics["total_return"] > best_return):
+            best_return = metrics["total_return"]
+            best_return_id = row["id"]
+    rows.sort(key=lambda item: ((item.get("metrics") or {}).get("total_return") is not None, (item.get("metrics") or {}).get("total_return") or -999), reverse=True)
+    return {
+        "symbol": meta.get("symbol") or spec["symbol"],
+        "interval": spec["interval"],
+        "rows": rows,
+        "benchmark": benchmark,
+        "best_sharpe": best_sharpe_id if best_sharpe is not None else None,
+        "best_return": best_return_id if best_return is not None else None,
+        "allow_short": spec["allow_short"],
+        "warning": " ".join(warnings) if warnings else None,
+        "elapsed_ms": round((time.perf_counter() - started) * 1000, 1),
     }
 
 
@@ -270,6 +386,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(execute_backtest(spec, bars=meta["bars"], meta=meta))
             elif parsed.path == "/api/sweep":
                 self._json(execute_sweep(body))
+            elif parsed.path == "/api/compare":
+                self._json(execute_compare(body))
             elif parsed.path == "/api/paper/order":
                 qty = body.get("qty")
                 try:

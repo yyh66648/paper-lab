@@ -112,6 +112,30 @@ def test_round_trip_includes_fees():
     check(book.closed[0]["bars_held"] == 3, "持有根数计算错误")
 
 
+def test_penny_buy_stays_solvent():
+    result = run_backtest(_bars([0.5, 0.5, 0.55]), BuyHold(), cash=100_000, commission_bps=10, slippage_bps=0)
+    check(result["ending_cash"] >= -1e-6, f"低价股买入后现金为负：{result['ending_cash']}")
+    check(result["ending_position"] > 1000, "低价股应能成交，而不是在逐股扣减里卡死")
+
+
+def test_split_and_annualization():
+    from simtrader.metrics import infer_bars_per_year, split_report
+
+    start = 1_700_000_000
+    times = [start + i * 86400 for i in range(300)]
+    per_year = infer_bars_per_year(times, "1d", 300)
+    check(300 < per_year < 400, f"连续日线应按真实密度年化，得到 {per_year}")
+    equity = 100.0
+    rows = []
+    for i, ts in enumerate(times):
+        equity *= 1.001 if i < 210 else 0.999
+        rows.append({"t": ts, "label": f"d{i}", "equity": equity, "drawdown": 0, "position": 1, "close": 1})
+    report = split_report(100, rows, "1d")
+    check(report is not None, "样本应能切开")
+    check(report["in_sample"]["total_return"] > 0, "前半段应是盈利")
+    check(report["out_of_sample"]["total_return"] < 0, "后半段应是亏损")
+
+
 def test_indicators_and_plugins():
     check(sma_series([1, 2, 3, 4], 2) == [None, 1.5, 2.5, 3.5], "SMA 序列不正确")
     classes, warnings = strategy_catalog()
@@ -129,6 +153,8 @@ def run_all() -> None:
         test_short_disabled,
         test_view_hides_future,
         test_round_trip_includes_fees,
+        test_penny_buy_stays_solvent,
+        test_split_and_annualization,
         test_indicators_and_plugins,
     ]
     for test in tests:

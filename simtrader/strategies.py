@@ -116,8 +116,11 @@ class SmaCross(Strategy):
         slow = self.slow_line[view.i]
         if fast is None or slow is None:
             return 0.0
-        self.note = "金叉" if fast > slow else "死叉"
-        return 1.0 if fast > slow else 0.0
+        if fast > slow:
+            self.note = "短均线在上方"
+            return 1.0
+        self.note = "短均线不在上方"
+        return 0.0
 
     def overlays(self):
         return [
@@ -149,8 +152,11 @@ class EmaCross(Strategy):
         slow = self.slow_line[view.i]
         if fast is None or slow is None:
             return 0.0
-        self.note = "EMA 金叉" if fast > slow else "EMA 死叉"
-        return 1.0 if fast > slow else 0.0
+        if fast > slow:
+            self.note = "短 EMA 在上方"
+            return 1.0
+        self.note = "短 EMA 不在上方"
+        return 0.0
 
     def overlays(self):
         return [

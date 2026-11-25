@@ -130,6 +130,7 @@ class PositionBook:
         side = "long" if self.qty > 0 else "short"
         qty = abs(self.qty)
         pnl = (price - self.avg) * qty if side == "long" else (self.avg - price) * qty
+        pnl -= self.fee_pool
         fake_fill = {"t": last_bar["t"], "label": last_bar["label"], "bar_index": last_index}
         return self._trade(side, qty, price, pnl, self.avg * qty, fake_fill, open_trade=True)
 
@@ -158,12 +159,10 @@ def _execute(cash, position, target_pct, open_px, commission_rate, slippage_bps,
     side_sign = 1 if delta > 0 else -1
     fill_px = open_px * (1.0 + slip if delta > 0 else 1.0 - slip)
     qty = abs(delta)
-    while qty > 0:
-        fee = qty * fill_px * commission_rate
-        cash_after = cash - side_sign * qty * fill_px - fee
-        if cash_after >= -1e-6:
-            break
-        qty -= 1
+    if side_sign > 0:
+        unit = fill_px * (1.0 + commission_rate)
+        affordable = int(cash / unit) if unit > 0 else 0
+        qty = min(qty, max(0, affordable))
     if qty <= 0:
         return cash, position, None
     fee = qty * fill_px * commission_rate
@@ -186,6 +185,7 @@ def run_backtest(
     allow_short: bool = False,
     bench_bars: list[dict] | None = None,
     symbol: str = "",
+    include_benchmark: bool = True,
 ) -> dict:
     if len(bars) < 2:
         raise EngineError("K 线不足，无法回测。")
@@ -201,16 +201,22 @@ def run_backtest(
     result = _simulate(
         bars, strategy, float(cash), commission_rate, slippage_bps, allow_short, symbol=symbol
     )
-    bench_source = bars if bench_bars is None else _align(bars, bench_bars)
-    benchmark = _simulate(
-        bench_source,
-        BuyHold(),
-        float(cash),
-        commission_rate,
-        slippage_bps,
-        False,
-        symbol="",
-    )
+    if include_benchmark:
+        bench_source = bars if bench_bars is None else _align(bars, bench_bars)
+        benchmark = _simulate(
+            bench_source,
+            BuyHold(),
+            float(cash),
+            commission_rate,
+            slippage_bps,
+            False,
+            symbol="",
+        )
+        bench_values = benchmark["equity_values"]
+        bench_fees = benchmark["fees"]
+    else:
+        bench_values = [None] * len(bars)
+        bench_fees = 0.0
     drawdowns = _drawdowns(float(cash), result["equity_values"])
     equity = []
     for i, bar in enumerate(bars):
@@ -219,7 +225,7 @@ def run_backtest(
                 "t": bar["t"],
                 "label": bar["label"],
                 "equity": result["equity_values"][i],
-                "bench": benchmark["equity_values"][i],
+                "bench": bench_values[i],
                 "drawdown": drawdowns[i],
                 "position": result["positions"][i],
                 "close": bar["c"],
@@ -238,8 +244,8 @@ def run_backtest(
         "ending_cash": result["cash"],
         "ending_position": result["position"],
         "ending_signal": result["last_signal"],
-        "bench_equity": benchmark["equity_values"],
-        "bench_fees": benchmark["fees"],
+        "bench_equity": bench_values,
+        "bench_fees": bench_fees,
     }
 
 

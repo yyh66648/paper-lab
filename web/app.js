@@ -278,6 +278,13 @@ function drawPrice() {
       }
     }
   });
+  (state.result?.markers || []).forEach((marker) => {
+    const index = indexOfTime(marker.t);
+    if (index >= state.viewStart && index < state.viewEnd && Number.isFinite(marker.price)) {
+      min = Math.min(min, marker.price);
+      max = Math.max(max, marker.price);
+    }
+  });
   const y = yScale(min, max, plot.top, priceHeight);
   const slot = plot.width / bars.length;
   ctx.font = '11px Consolas, "Microsoft YaHei", sans-serif';
@@ -572,16 +579,23 @@ function renderMetrics() {
     ["夏普", fmt.num(m.sharpe), m.sharpe],
     ["胜率", fmt.pct(m.win_rate), null],
     ["盈亏因子", fmt.num(m.profit_factor), null],
-    ["交易次数", String(m.trades ?? "—"), null],
+    ["交易次数", m.open_trades ? `${m.trades}+${m.open_trades}` : String(m.trades ?? "—"), null],
     ["期末权益", fmt.usd(m.ending_equity), m.total_return],
   ];
   const bench = result.benchmark?.metrics;
-  const excess = bench ? m.total_return - bench.total_return : null;
+  const excess = bench && Number.isFinite(m.total_return) && Number.isFinite(bench.total_return)
+    ? m.total_return - bench.total_return
+    : null;
   const position = m.ending_position || 0;
   const weight = Number.isFinite(m.ending_weight) ? fmt.pct(m.ending_weight).replace("+", "") : "—";
+  const split = result.split;
+  const splitText = split
+    ? `同一套规则未重新调参：前 70% 到 ${split.split_label} ${fmt.pct(split.in_sample.total_return)}，后 30% ${fmt.pct(split.out_of_sample.total_return)}。`
+    : "";
+  const excessText = excess == null ? "" : `相对基准 ${fmt.pct(excess)}。`;
   box.innerHTML = tiles
     .map(([label, value, signed]) => `<div class="tile"><span>${label}</span><strong class="num ${signed == null ? "" : tone(signed)}">${value}</strong></div>`)
-    .join("") + `<p class="sentence">${bench ? `同一区间${result.benchmark.label} ${fmt.pct(bench.total_return)}，策略${excess >= 0 ? "多出" : "少了"} ${fmt.pct(Math.abs(excess)).replace("+", "")}。基准最大回撤 ${fmt.pct(bench.max_drawdown)}。` : "这次没有放基准。"}结束时持仓 ${position} 股（约 ${weight}），目标仓位 ${Math.round((result.ending_signal || 0) * 100)}%。手续费 ${fmt.usd2(m.fees)}，用时 ${result.elapsed_ms} ms。</p>`;
+    .join("") + `<p class="sentence">${bench ? `${result.benchmark.label} ${fmt.pct(bench.total_return)}，回撤 ${fmt.pct(bench.max_drawdown)}。` : ""}${excessText}${splitText}波动 ${fmt.pct(m.volatility)}，索提诺 ${fmt.num(m.sortino)}，卡玛 ${fmt.num(m.calmar)}，持仓 ${fmt.pct(m.exposure)}，均持 ${fmt.num(m.avg_hold_bars, 0)} 根，结束 ${position} 股（${weight}），费用 ${fmt.usd2(m.fees)}。</p>`;
 }
 
 function renderTrades() {
@@ -606,14 +620,33 @@ function renderTrades() {
   $("tab-trades").innerHTML = `<table><thead><tr><th class="left">方向</th><th class="left">开仓</th><th>开仓价</th><th class="left">平仓</th><th>平仓价</th><th>数量</th><th>盈亏</th><th>收益率</th><th>持有</th><th class="left">备注</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+function paramText(params) {
+  const values = Object.values(params || {});
+  return values.length ? values.join("/") : "";
+}
+
 function renderCompare() {
-  if (!state.pins.length) {
-    $("tab-compare").innerHTML = `<p class="empty">运行后点「加入对比」，最多叠 5 条净值。适合同一只股票上换策略或换参数。</p>`;
-    return;
+  const board = state.leaderboard;
+  let boardHtml = `<p class="empty">点右侧「跑全部策略」，用默认参数在同一费用下横向比较。点一行会按那套参数重跑。</p>`;
+  if (board?.rows?.length) {
+    const bench = board.benchmark?.metrics;
+    boardHtml = `<p class="empty">${board.symbol} · 各策略默认参数 · 同一费用${board.allow_short ? " · 允许做空" : ""} · ${board.elapsed_ms} ms${bench ? ` · ${board.benchmark.label} ${fmt.pct(bench.total_return)}` : ""}。铜色是夏普最高。</p><table><thead><tr><th class="left">策略</th><th>参数</th><th>总收益</th><th>超额</th><th>最大回撤</th><th>夏普</th><th>交易</th><th>持仓占比</th></tr></thead><tbody>${
+      board.rows.map((row) => {
+        const m = row.metrics;
+        if (!m) return `<tr><td class="left">${row.name}</td><td colspan="7">${row.error || "没有结果"}</td></tr>`;
+        const excess = bench && Number.isFinite(m.total_return) ? m.total_return - bench.total_return : null;
+        const mark = row.id === board.best_sharpe ? "best" : "";
+        const closed = `${m.trades}${m.open_trades ? "+" + m.open_trades : ""}`;
+        return `<tr class="clickable ${mark}" data-strategy="${row.id}" title="${row.warning || ""}"><td class="left">${row.name}${row.origin === "user" ? " · 自定义" : ""}</td><td class="num">${paramText(row.params)}</td><td class="num ${tone(m.total_return)}">${fmt.pct(m.total_return)}</td><td class="num ${tone(excess)}">${fmt.pct(excess)}</td><td class="num down">${fmt.pct(m.max_drawdown)}</td><td class="num">${fmt.num(m.sharpe)}</td><td class="num" title="已平仓+仍持有">${closed}</td><td class="num">${fmt.pct(m.exposure)}</td></tr>`;
+      }).join("")
+    }</tbody></table>`;
   }
-  $("tab-compare").innerHTML = `<table><thead><tr><th class="left">曲线</th><th>总收益</th><th>最大回撤</th><th>夏普</th><th></th></tr></thead><tbody>${
-    state.pins.map((pin) => `<tr><td class="left"><i style="background:${pin.color};display:inline-block;width:8px;height:8px;margin-right:6px"></i>${pin.label}</td><td class="num ${tone(pin.metrics.total_return)}">${fmt.pct(pin.metrics.total_return)}</td><td class="num down">${fmt.pct(pin.metrics.max_drawdown)}</td><td class="num">${fmt.num(pin.metrics.sharpe)}</td><td><button class="text" data-remove="${pin.id}" type="button">移除</button></td></tr>`).join("")
-  }</tbody></table>`;
+  const pinHtml = state.pins.length
+    ? `<table><thead><tr><th class="left">已叠曲线</th><th>总收益</th><th>最大回撤</th><th>夏普</th><th></th></tr></thead><tbody>${
+        state.pins.map((pin) => `<tr><td class="left"><i style="background:${pin.color};display:inline-block;width:8px;height:8px;margin-right:6px"></i>${pin.label}</td><td class="num ${tone(pin.metrics.total_return)}">${fmt.pct(pin.metrics.total_return)}</td><td class="num down">${fmt.pct(pin.metrics.max_drawdown)}</td><td class="num">${fmt.num(pin.metrics.sharpe)}</td><td><button class="text" data-remove="${pin.id}" type="button">移除</button></td></tr>`).join("")
+      }</tbody></table>`
+    : "";
+  $("tab-compare").innerHTML = boardHtml + pinHtml;
 }
 
 function renderSweep(payload) {
@@ -759,6 +792,44 @@ async function runSweep() {
   } finally {
     $("sweepBtn").disabled = false;
     $("sweepBtn").textContent = "扫描";
+  }
+}
+
+function showTab(name) {
+  document.querySelectorAll(".blotter-tabs [data-tab]").forEach((item) => item.classList.toggle("on", item.dataset.tab === name));
+  ["trades", "compare", "sweep"].forEach((tab) => {
+    $("tab-" + tab).hidden = tab !== name;
+  });
+}
+
+async function compareAll() {
+  if (!state.symbol) return;
+  const body = {
+    symbol: state.symbol,
+    interval: state.interval,
+    start: $("startDate").value,
+    end: $("endDate").value,
+    strategy: $("strategySelect").value || "buy_hold",
+    params: readParams(),
+    ...assumptions(),
+  };
+  $("compareAllBtn").disabled = true;
+  $("compareAllBtn").textContent = "比较中…";
+  try {
+    const data = await api("/api/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    state.leaderboard = data;
+    renderCompare();
+    showTab("compare");
+    showBanner(data.warning || `全部策略比较完成，用时 ${data.elapsed_ms} ms。夏普最高的一行标成铜色。`);
+  } catch (error) {
+    showBanner(error.message, "error");
+  } finally {
+    $("compareAllBtn").disabled = false;
+    $("compareAllBtn").textContent = "跑全部策略";
   }
 }
 
@@ -931,13 +1002,22 @@ function bind() {
     const row = event.target.closest("tr[data-entry]");
     if (row) focusTrade(row.dataset.entry, row.dataset.exit);
   };
-  $("tab-compare").onclick = (event) => {
+  $("tab-compare").onclick = async (event) => {
     const button = event.target.closest("[data-remove]");
-    if (!button) return;
-    state.pins = state.pins.filter((pin) => pin.id !== button.dataset.remove);
-    renderCompare();
-    drawEquity();
+    if (button) {
+      state.pins = state.pins.filter((pin) => pin.id !== button.dataset.remove);
+      renderCompare();
+      drawEquity();
+      return;
+    }
+    const row = event.target.closest("tr[data-strategy]");
+    if (!row) return;
+    $("strategySelect").value = row.dataset.strategy;
+    state.savedParams = null;
+    renderStrategyForm();
+    await runBacktest();
   };
+  $("compareAllBtn").onclick = compareAll;
   $("sweepBtn").onclick = runSweep;
   $("sweepParam").onchange = () => {
     const spec = (currentStrategy()?.params || []).find((item) => item.key === $("sweepParam").value);
