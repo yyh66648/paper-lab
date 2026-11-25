@@ -631,7 +631,7 @@ function renderMetrics() {
   const m = result.metrics;
   const tiles = [
     ["总收益", fmt.pct(m.total_return), m.total_return],
-    ["年化", fmt.pct(m.cagr), m.cagr],
+    ["年化", m.years < 1 ? `${fmt.pct(m.cagr)}*` : fmt.pct(m.cagr), m.cagr],
     ["最大回撤", fmt.pct(m.max_drawdown), m.max_drawdown],
     ["夏普", fmt.num(m.sharpe), m.sharpe],
     ["胜率", fmt.pct(m.win_rate), null],
@@ -639,6 +639,9 @@ function renderMetrics() {
     ["交易次数", m.open_trades ? `${m.trades}+${m.open_trades}` : String(m.trades ?? "—"), null],
     ["期末权益", fmt.money(m.ending_equity, currency(), 0), m.total_return],
   ];
+  const shortSample = m.years < 1
+    ? `* 样本只有 ${Math.max(0, m.years * 12).toFixed(1)} 个月，年化会把短期收益放大，不能当长期预期。`
+    : "";
   const bench = result.benchmark?.metrics;
   const excess = bench && Number.isFinite(m.total_return) && Number.isFinite(bench.total_return)
     ? m.total_return - bench.total_return
@@ -652,7 +655,7 @@ function renderMetrics() {
   const excessText = excess == null ? "" : `相对基准 ${fmt.pct(excess)}。`;
   box.innerHTML = tiles
     .map(([label, value, signed]) => `<div class="tile"><span>${label}</span><strong class="num ${signed == null ? "" : tone(signed)}">${value}</strong></div>`)
-    .join("") + `<p class="sentence">${bench ? `${result.benchmark.label} ${fmt.pct(bench.total_return)}，回撤 ${fmt.pct(bench.max_drawdown)}。` : ""}${excessText}${splitText}波动 ${fmt.pct(m.volatility)}，索提诺 ${fmt.num(m.sortino)}，卡玛 ${fmt.num(m.calmar)}，持仓 ${fmt.pct(m.exposure)}，均持 ${fmt.num(m.avg_hold_bars, 0)} 根，结束 ${position} 股（${weight}），费用 ${fmt.money(m.fees, currency())}。</p>`;
+    .join("") + `<p class="sentence">${shortSample}${bench ? `${result.benchmark.label} ${fmt.pct(bench.total_return)}，回撤 ${fmt.pct(bench.max_drawdown)}。` : ""}${excessText}${splitText}波动 ${fmt.pct(m.volatility)}，索提诺 ${fmt.num(m.sortino)}，卡玛 ${fmt.num(m.calmar)}，持仓 ${fmt.pct(m.exposure)}，均持 ${fmt.num(m.avg_hold_bars, 0)} 根，结束 ${position} 股（${weight}），费用 ${fmt.money(m.fees, currency())}。</p>`;
 }
 
 function renderTrades() {

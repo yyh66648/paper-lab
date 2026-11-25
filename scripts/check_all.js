@@ -14,6 +14,7 @@ const steps = [
   ["Python 引擎自检", null],
   ["Python/JS 一致性", [path.join(root, "scripts", "parity.js")]],
   ["止损止盈", [path.join(root, "scripts", "risk_test.js")]],
+  ["空头风控", [path.join(root, "scripts", "short_risk_test.js")]],
   ["整手与 T+1", [path.join(root, "scripts", "lot_test.js")]],
   ["二维扫描", [path.join(root, "scripts", "heatmap_test.js")]],
   ["批量稳健性", [path.join(root, "scripts", "batch_test.js")]],
