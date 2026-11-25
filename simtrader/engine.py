@@ -141,7 +141,7 @@ def _clamp_weight(weight: float, allow_short: bool) -> float:
     return max(-1.0, min(1.0, weight))
 
 
-def _execute(cash, position, target_pct, open_px, commission_rate, slippage_bps, allow_short):
+def _execute(cash, position, target_pct, open_px, commission_rate, slippage_bps, allow_short, lot=1):
     if open_px is None or open_px <= 0:
         return cash, position, None
     target_pct = _clamp_weight(float(target_pct), allow_short)
@@ -152,7 +152,9 @@ def _execute(cash, position, target_pct, open_px, commission_rate, slippage_bps,
     size_px = open_px * (1.0 + slip if target_pct >= 0 else 1.0 - slip)
     if size_px <= 0:
         return cash, position, None
-    desired = int(equity * target_pct / size_px)
+    lot_size = max(1, int(lot or 1))
+    raw_desired = int(equity * target_pct / size_px)
+    desired = int(raw_desired / lot_size) * lot_size
     delta = desired - int(position)
     if delta == 0:
         return cash, position, None
@@ -162,7 +164,7 @@ def _execute(cash, position, target_pct, open_px, commission_rate, slippage_bps,
     if side_sign > 0:
         unit = fill_px * (1.0 + commission_rate)
         affordable = int(cash / unit) if unit > 0 else 0
-        qty = min(qty, max(0, affordable))
+        qty = min(qty, max(0, int(affordable / lot_size) * lot_size))
     if qty <= 0:
         return cash, position, None
     fee = qty * fill_px * commission_rate
@@ -186,6 +188,10 @@ def run_backtest(
     bench_bars: list[dict] | None = None,
     symbol: str = "",
     include_benchmark: bool = True,
+    lot: int = 1,
+    t_plus_one: bool = False,
+    stop_loss_pct: float = 0.0,
+    take_profit_pct: float = 0.0,
 ) -> dict:
     if len(bars) < 2:
         raise EngineError("K 线不足，无法回测。")
@@ -199,7 +205,8 @@ def run_backtest(
 
     commission_rate = commission_bps / 10000.0
     result = _simulate(
-        bars, strategy, float(cash), commission_rate, slippage_bps, allow_short, symbol=symbol
+        bars, strategy, float(cash), commission_rate, slippage_bps, allow_short, symbol=symbol,
+        lot=lot, t_plus_one=t_plus_one, stop_loss_pct=stop_loss_pct, take_profit_pct=take_profit_pct,
     )
     if include_benchmark:
         bench_source = bars if bench_bars is None else _align(bars, bench_bars)
@@ -283,7 +290,7 @@ def _drawdowns(initial: float, equities: list[float]) -> list[float]:
     return out
 
 
-def _simulate(bars, strategy, cash, commission_rate, slippage_bps, allow_short, symbol) -> dict:
+def _simulate(bars, strategy, cash, commission_rate, slippage_bps, allow_short, symbol, lot=1, t_plus_one=False, stop_loss_pct=0.0, take_profit_pct=0.0) -> dict:
     opens = [bar.get("o") for bar in bars]
     highs = [bar.get("h") for bar in bars]
     lows = [bar.get("l") for bar in bars]
@@ -303,10 +310,13 @@ def _simulate(bars, strategy, cash, commission_rate, slippage_bps, allow_short, 
     positions = []
     clamped = False
 
+    lottery = max(1, int(lot or 1))
+    stop_loss = float(stop_loss_pct or 0) / 100.0
+    take_profit = float(take_profit_pct or 0) / 100.0
     for i, bar in enumerate(bars):
         if pending is not None and bar.get("o"):
             cash, position, fill = _execute(
-                cash, position, pending, bar["o"], commission_rate, slippage_bps, allow_short
+                cash, position, pending, bar["o"], commission_rate, slippage_bps, allow_short, lottery
             )
             if fill is not None:
                 fill.update(
@@ -331,6 +341,50 @@ def _simulate(bars, strategy, cash, commission_rate, slippage_bps, allow_short, 
                 )
             pending = None
             pending_note = ""
+
+        if position != 0 and book.avg > 0 and (stop_loss > 0 or take_profit > 0):
+            long_side = position > 0
+            blocked_by_t1 = t_plus_one and book.entry_index == i
+            if not blocked_by_t1:
+                stop_px = book.avg * (1 - stop_loss) if long_side else book.avg * (1 + stop_loss)
+                take_px = book.avg * (1 + take_profit) if long_side else book.avg * (1 - take_profit)
+                open_px = bar.get("o") or bar.get("c")
+                exit_px = None
+                reason = ""
+                if long_side:
+                    if stop_loss > 0 and bar["l"] <= stop_px:
+                        exit_px, reason = min(open_px, stop_px), "止损"
+                    elif take_profit > 0 and bar["h"] >= take_px:
+                        exit_px, reason = max(open_px, take_px), "止盈"
+                elif stop_loss > 0 and bar["h"] >= stop_px:
+                    exit_px, reason = max(open_px, stop_px), "止损"
+                elif take_profit > 0 and bar["l"] <= take_px:
+                    exit_px, reason = min(open_px, take_px), "止盈"
+                if exit_px is not None:
+                    qty = abs(position)
+                    slip = slippage_bps / 10000.0
+                    fill_px = exit_px * (1 - slip) if long_side else exit_px * (1 + slip)
+                    fee = qty * fill_px * commission_rate
+                    cash += (1 if long_side else -1) * qty * fill_px - fee
+                    fill = {
+                        "side": "sell" if long_side else "buy",
+                        "qty": qty,
+                        "price": fill_px,
+                        "fee": fee,
+                        "t": bar["t"],
+                        "label": bar["label"],
+                        "bar_index": i,
+                        "note": reason,
+                    }
+                    position = 0
+                    fees += fee
+                    book.apply(fill)
+                    markers.append(
+                        {"t": bar["t"], "label": bar["label"], "side": fill["side"], "price": fill_px, "qty": qty, "note": reason}
+                    )
+                    last_signal = 0.0
+                    pending = None
+                    pending_note = ""
 
         mark = bar["c"] if bar.get("c") else (opens[i] or 0)
         equity = cash + position * (mark or 0)

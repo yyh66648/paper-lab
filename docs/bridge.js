@@ -44,7 +44,7 @@ function emptyMetrics() {
 }
 
 const Bridge = {
-  backtest({ symbol, interval, start, end, meta, strategyId, params, cash, commissionBps, slippageBps, allowShort, benchmark, benchBars = null, benchSymbol = null, benchLabel = null, stopLossPct = 0, takeProfitPct = 0 }) {
+  backtest({ symbol, interval, start, end, meta, strategyId, params, cash, commissionBps, slippageBps, allowShort, benchmark, benchBars = null, benchSymbol = null, benchLabel = null, stopLossPct = 0, takeProfitPct = 0, lot = 1, tPlusOne = false }) {
     const started = performance.now();
     const bars = meta.bars;
     const { strategy, warning } = Engine.createStrategy(strategyId, params);
@@ -56,7 +56,7 @@ const Bridge = {
       warnings.push(`${benchmark} 没有加载成功，已改和同一标的的买入持有对比。`);
     }
     const raw = Engine.runBacktest(bars, strategy, {
-      cash, commissionBps, slippageBps, allowShort, benchBars, symbol, stopLossPct, takeProfitPct,
+      cash, commissionBps, slippageBps, allowShort, benchBars, symbol, stopLossPct, takeProfitPct, lot, tPlusOne,
     });
     warnings.push(...raw.warnings);
     if (benchmark === "none") {
@@ -103,6 +103,7 @@ const Bridge = {
       assumptions: {
         cash, commission_bps: commissionBps, slippage_bps: slippageBps,
         allow_short: allowShort, fill: "下一根开盘", stop_loss_pct: stopLossPct, take_profit_pct: takeProfitPct,
+        lot, t_plus_one: tPlusOne,
       },
       split: snake(Engine.splitReport(cash, raw.equity, interval)),
       elapsed_ms: Math.round((performance.now() - started) * 10) / 10,

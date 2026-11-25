@@ -404,7 +404,7 @@ function clampWeight(weight, allowShort) {
   return allowShort ? clamp(weight, -1, 1) : clamp(weight, 0, 1);
 }
 
-function executeOrder(cash, position, targetPct, openPx, commissionRate, slippageBps, allowShort) {
+function executeOrder(cash, position, targetPct, openPx, commissionRate, slippageBps, allowShort, lot = 1) {
   if (openPx === null || openPx === undefined || openPx <= 0) return { cash, position, fill: null };
   targetPct = clampWeight(Number(targetPct), allowShort);
   const equity = cash + position * openPx;
@@ -412,7 +412,10 @@ function executeOrder(cash, position, targetPct, openPx, commissionRate, slippag
   const slip = slippageBps / 10000;
   const sizePx = openPx * (targetPct >= 0 ? 1 + slip : 1 - slip);
   if (sizePx <= 0) return { cash, position, fill: null };
-  const desired = Math.trunc((equity * targetPct) / sizePx);
+  const lotSize = Math.max(1, Math.trunc(lot) || 1);
+  const rawDesired = Math.trunc((equity * targetPct) / sizePx);
+  // A 股要整手买，卖出可以零股。这里对目标股数向下取整到整手。
+  const desired = Math.trunc(rawDesired / lotSize) * lotSize;
   let delta = desired - Math.trunc(position);
   if (delta === 0) return { cash, position, fill: null };
   const sideSign = delta > 0 ? 1 : -1;
@@ -420,8 +423,8 @@ function executeOrder(cash, position, targetPct, openPx, commissionRate, slippag
   let qty = Math.abs(delta);
   if (sideSign > 0) {
     const unit = fillPx * (1 + commissionRate);
-    const affordable = unit > 0 ? Math.trunc(cash / unit) : 0;
-    qty = Math.min(qty, Math.max(0, affordable));
+    const affordable = Math.trunc(cash / unit);
+    qty = Math.min(qty, Math.max(0, Math.trunc(affordable / lotSize) * lotSize));
   }
   if (qty <= 0) return { cash, position, fill: null };
   const fee = qty * fillPx * commissionRate;
@@ -567,6 +570,8 @@ function makeView(i, arrays, position, cash, equity, symbol) {
 function simulate(bars, strategy, cash, commissionRate, slippageBps, allowShort, symbol, risk = {}) {
   const stopLoss = Number(risk.stopLossPct) > 0 ? Number(risk.stopLossPct) / 100 : 0;
   const takeProfit = Number(risk.takeProfitPct) > 0 ? Number(risk.takeProfitPct) / 100 : 0;
+  const lot = Math.max(1, Math.trunc(Number(risk.lot) || 1));
+  const tPlusOne = Boolean(risk.tPlusOne);
   const slip = slippageBps / 10000;
   const arrays = {
     opens: bars.map((bar) => bar.o),
@@ -591,7 +596,7 @@ function simulate(bars, strategy, cash, commissionRate, slippageBps, allowShort,
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
     if (pending !== null && pending !== undefined && bar.o) {
-      const applied = executeOrder(cash, position, pending, bar.o, commissionRate, slippageBps, allowShort);
+      const applied = executeOrder(cash, position, pending, bar.o, commissionRate, slippageBps, allowShort, lot);
       cash = applied.cash;
       position = applied.position;
       if (applied.fill) {
@@ -616,48 +621,52 @@ function simulate(bars, strategy, cash, commissionRate, slippageBps, allowShort,
     // 止损止盈：当根的最高最低价已经碰到阈值，就按触发价平掉，不用等下一根开盘。
     if (position !== 0 && book.avg > 0 && (stopLoss > 0 || takeProfit > 0)) {
       const long = position > 0;
-      const stopPx = long ? book.avg * (1 - stopLoss) : book.avg * (1 + stopLoss);
-      const takePx = long ? book.avg * (1 + takeProfit) : book.avg * (1 - takeProfit);
-      const openPx = bar.o || bar.c;
-      let exitPx = null;
-      let reason = "";
-      if (long) {
-        if (stopLoss > 0 && bar.l <= stopPx) {
-          exitPx = Math.min(openPx, stopPx);
+      // T+1：当天买入的仓位当天不能卖。
+      const blockedByT1 = tPlusOne && book.entryIndex === i;
+      if (!blockedByT1) {
+        const stopPx = long ? book.avg * (1 - stopLoss) : book.avg * (1 + stopLoss);
+        const takePx = long ? book.avg * (1 + takeProfit) : book.avg * (1 - takeProfit);
+        const openPx = bar.o || bar.c;
+        let exitPx = null;
+        let reason = "";
+        if (long) {
+          if (stopLoss > 0 && bar.l <= stopPx) {
+            exitPx = Math.min(openPx, stopPx);
+            reason = "止损";
+          } else if (takeProfit > 0 && bar.h >= takePx) {
+            exitPx = Math.max(openPx, takePx);
+            reason = "止盈";
+          }
+        } else if (stopLoss > 0 && bar.h >= stopPx) {
+          exitPx = Math.max(openPx, stopPx);
           reason = "止损";
-        } else if (takeProfit > 0 && bar.h >= takePx) {
-          exitPx = Math.max(openPx, takePx);
+        } else if (takeProfit > 0 && bar.l <= takePx) {
+          exitPx = Math.min(openPx, takePx);
           reason = "止盈";
         }
-      } else if (stopLoss > 0 && bar.h >= stopPx) {
-        exitPx = Math.max(openPx, stopPx);
-        reason = "止损";
-      } else if (takeProfit > 0 && bar.l <= takePx) {
-        exitPx = Math.min(openPx, takePx);
-        reason = "止盈";
-      }
-      if (exitPx !== null) {
-        const qty = Math.abs(position);
-        const fillPx = long ? exitPx * (1 - slip) : exitPx * (1 + slip);
-        const fee = qty * fillPx * commissionRate;
-        cash += (long ? 1 : -1) * qty * fillPx - fee;
-        const fill = {
-          side: long ? "sell" : "buy",
-          qty,
-          price: fillPx,
-          fee,
-          t: bar.t,
-          label: bar.label,
-          barIndex: i,
-          note: reason,
-        };
-        position = 0;
-        fees += fee;
-        book.apply(fill);
-        markers.push({ t: bar.t, label: bar.label, side: fill.side, price: fillPx, qty, note: reason });
-        lastSignal = 0;
-        pending = null;
-        pendingNote = "";
+        if (exitPx !== null) {
+          const qty = Math.abs(position);
+          const fillPx = long ? exitPx * (1 - slip) : exitPx * (1 + slip);
+          const fee = qty * fillPx * commissionRate;
+          cash += (long ? 1 : -1) * qty * fillPx - fee;
+          const fill = {
+            side: long ? "sell" : "buy",
+            qty,
+            price: fillPx,
+            fee,
+            t: bar.t,
+            label: bar.label,
+            barIndex: i,
+            note: reason,
+          };
+          position = 0;
+          fees += fee;
+          book.apply(fill);
+          markers.push({ t: bar.t, label: bar.label, side: fill.side, price: fillPx, qty, note: reason });
+          lastSignal = 0;
+          pending = null;
+          pendingNote = "";
+        }
       }
     }
     const mark = bar.c ? bar.c : arrays.opens[i] || 0;
@@ -729,6 +738,8 @@ function runBacktest(bars, strategy, options = {}) {
     includeBenchmark = true,
     stopLossPct = 0,
     takeProfitPct = 0,
+    lot = 1,
+    tPlusOne = false,
   } = options;
   if (!bars || bars.length < 2) throw new Error("K 线不足，无法回测。");
   const opens = bars.map((bar) => bar.o);
@@ -742,6 +753,8 @@ function runBacktest(bars, strategy, options = {}) {
   const result = simulate(bars, strategy, Number(cash), commissionRate, slippageBps, allowShort, symbol, {
     stopLossPct,
     takeProfitPct,
+    lot,
+    tPlusOne,
   });
   let benchValues;
   let benchFees;

@@ -113,6 +113,8 @@ function assumptions() {
     benchmark: $("benchmark").value,
     stopLossPct: Number($("stopLoss").value) || 0,
     takeProfitPct: Number($("takeProfit").value) || 0,
+    lot: Math.max(1, Number($("lotSize").value) || 1),
+    tPlusOne: $("tPlusOne").checked,
   };
 }
 
@@ -778,6 +780,8 @@ async function runBacktest() {
       benchLabel,
       stopLossPct: opts.stopLossPct,
       takeProfitPct: opts.takeProfitPct,
+      lot: opts.lot,
+      tPlusOne: opts.tPlusOne,
     });
     if (token !== state.runToken) return;
     state.result = result;
@@ -1183,9 +1187,15 @@ function bind() {
     if (state.market === "us" && bench === "510300.SH") $("benchmark").value = "SPY";
     const first = (WATCH[state.market] || [])[0];
     if (first) $("symbolInput").value = first;
-    $("dataHint").textContent = state.market === "cn"
-      ? "A 股日K是前复权。分钟线只有最近一段。"
-      : "图表用复权价，避免拆股被看成暴跌。";
+    if (state.market === "cn") {
+      $("lotSize").value = 100;
+      $("tPlusOne").checked = true;
+      $("dataHint").textContent = "A 股：前复权日K，整手 100 股，T+1。分钟线只有最近一段。";
+    } else {
+      $("lotSize").value = 1;
+      $("tPlusOne").checked = false;
+      $("dataHint").textContent = "美股是每日更新的复权快照，按 1 股成交。";
+    }
     renderWatch();
     await loadBars(false);
   };
@@ -1331,6 +1341,8 @@ async function init() {
   if (saved?.allow_short) $("allowShort").checked = true;
   if (saved?.stopLossPct != null) $("stopLoss").value = saved.stopLossPct;
   if (saved?.takeProfitPct != null) $("takeProfit").value = saved.takeProfitPct;
+  if (saved?.lot) $("lotSize").value = saved.lot;
+  if (saved?.tPlusOne) $("tPlusOne").checked = true;
   if (saved?.benchmark) $("benchmark").value = saved.benchmark;
   state.market = saved?.market === "cn" ? "cn" : "us";
   state.symbol = (saved?.symbol || (state.market === "cn" ? "600519.SH" : "NVDA")).toUpperCase();

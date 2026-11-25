@@ -146,6 +146,36 @@ def test_cn_symbols():
     check(canonical_symbol("300750") == "300750.SZ", canonical_symbol("300750"))
 
 
+def test_lot_and_t1():
+    bars = _bars([10, 10, 10])
+    result = run_backtest(bars, BuyHold(), cash=10_000, commission_bps=0, slippage_bps=0, lot=100)
+    check(result["ending_position"] == 1000, f"整手买入应为 1000 股，实际 {result['ending_position']}")
+    check(result["ending_position"] % 100 == 0, "持仓应是整手")
+
+    thin = run_backtest(_bars([333, 333]), BuyHold(), cash=10_000, commission_bps=0, slippage_bps=0, lot=100)
+    check(thin["ending_position"] == 0, f"买不起一手应空仓，实际 {thin['ending_position']}")
+
+    t1_bars = _bars([100, 88, 89])
+    t1_bars[0] = {**t1_bars[0], "o": 100, "h": 100, "l": 85, "c": 88}
+    result = run_backtest(t1_bars, BuyHold(), cash=10_000, commission_bps=0, slippage_bps=0, stop_loss_pct=10, t_plus_one=True)
+    stops = [m for m in result["markers"] if m["note"] == "止损"]
+    check(stops and stops[0]["label"] == "d1", f"T+1 应推迟到 d1，实际 {[m['label'] for m in stops]}")
+
+    free = run_backtest(t1_bars, BuyHold(), cash=10_000, commission_bps=0, slippage_bps=0, stop_loss_pct=10, t_plus_one=False)
+    stops_free = [m for m in free["markers"] if m["note"] == "止损"]
+    check(stops_free and stops_free[0]["label"] == "d0", "不限制时当天应止损")
+
+
+def test_stop_loss_and_take_profit():
+    bars = _bars([100, 100, 90])
+    bars[2] = {**bars[2], "o": 100, "h": 100, "l": 88, "c": 90}
+    result = run_backtest(bars, BuyHold(), cash=10_000, commission_bps=0, slippage_bps=0, stop_loss_pct=10)
+    stops = [m for m in result["markers"] if m["note"] == "止损"]
+    check(stops, "应触发出损")
+    check(abs(stops[0]["price"] - 90) < 1e-6, f"止损价应为 90，实际 {stops[0]['price']}")
+    check(result["ending_position"] == 0, "止损后应空仓")
+
+
 def test_indicators_and_plugins():
     check(sma_series([1, 2, 3, 4], 2) == [None, 1.5, 2.5, 3.5], "SMA 序列不正确")
     classes, warnings = strategy_catalog()
@@ -166,6 +196,8 @@ def run_all() -> None:
         test_penny_buy_stays_solvent,
         test_split_and_annualization,
         test_cn_symbols,
+        test_lot_and_t1,
+        test_stop_loss_and_take_profit,
         test_indicators_and_plugins,
     ]
     for test in tests:
