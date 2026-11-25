@@ -50,6 +50,17 @@ python run.py --selftest
 
 在线版的美股数据由 `.github/workflows/update-data.yml` 每个交易日跑一次，调用 `scripts/fetch_data.py` 抓 Yahoo 复权数据写进 `docs/data/`。也可以手动触发。
 
+没有 Actions 也能手动更新，在本机跑：
+
+```bat
+python scripts/fetch_data.py
+git add docs/data
+git commit -m "更新行情快照"
+git push
+```
+
+脚本会跳过当天已经抓过的文件，只补缺的。扩充股票池就改 `scripts/fetch_data.py` 顶部的 `US_SYMBOLS` 和 `US_ETFS`。
+
 ## 怎么用
 
 1. 左侧搜代码或点自选，加载日 K / 周 K / 小时 / 分钟线。
