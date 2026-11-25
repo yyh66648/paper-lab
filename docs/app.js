@@ -1,4 +1,4 @@
-const $ = (id) => document.getElementById(id);
+﻿const $ = (id) => document.getElementById(id);
 const WATCH = {
   us: ["NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "AMD", "SPY", "QQQ"],
   cn: ["600519.SH", "000001.SZ", "300750.SZ", "601318.SH", "000858.SZ", "002594.SZ", "510300.SH", "510050.SH", "159915.SZ"],
@@ -66,18 +66,11 @@ function shiftYears(date, years) {
   return next;
 }
 
-async function api(path, options) {
-  const response = await fetch(path, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
-  return data;
-}
-
-async function api(path, options) {
-  const response = await fetch(path, options);
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
-  return data;
+function esc(value) {
+  if (value === null || value === undefined) return "";
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[ch]);
 }
 
 function showBanner(text, kind = "warn") {
@@ -164,17 +157,17 @@ function renderQuote() {
   const change = quote?.change_pct;
   const name = quote?.name || meta.name || "";
   strip.innerHTML = `
-    <span class="sym">${meta.symbol || quote.symbol}</span>
+    <span class="sym">${esc(meta.symbol || quote.symbol)}</span>
     <span class="px num ${tone(change)}">${fmt.money(price, quote?.currency || currency(), Math.abs(price) >= 100 ? 2 : 2)}</span>
     <span class="num ${tone(change)}">${fmt.pct(change)}</span>
-    <span class="name">${name}${quote?.exchange ? " · " + quote.exchange : ""}</span>`;
+    <span class="name">${esc(name)}${quote?.exchange ? " · " + esc(quote.exchange) : ""}</span>`;
   const lastLabel = meta.end || state.bars.at(-1)?.label || "";
   const staleDays = stalenessDays(lastLabel);
   const freshTag = state.market === "us" && staleDays !== null
     ? (staleDays <= 1 ? " · 最新" : staleDays <= 4 ? ` · 落后 ${staleDays} 天` : ` · 已过时 ${staleDays} 天`)
     : "";
   $("dataSource").textContent = meta.source
-    ? `${meta.source}${meta.adjusted ? " · 复权" : ""}${freshTag}`
+    ? `${esc(meta.source)}${meta.adjusted ? " · 复权" : ""}${freshTag}`
     : "行情未连接";
   $("dataSource").className = state.market === "us" && staleDays > 4 ? "stale" : "";
 }
@@ -508,7 +501,7 @@ function drawEquity() {
   ctx.fillText("回撤 " + fmt.pct(Math.min(...dds)), plot.left, split + 12);
   canvas._plot = { ...plot, y, count: bars.length, series };
   $("equityLegend").innerHTML = series
-    .map((item) => `<span><i style="background:${item.color}"></i>${item.name}</span>`)
+    .map((item) => `<span><i style="background:${esc(item.color)}"></i>${esc(item.name)}</span>`)
     .join("");
 }
 
@@ -534,12 +527,12 @@ function drawAll() {
   drawEquity();
   const overlays = state.result?.overlays || [];
   $("priceLegend").innerHTML = overlays
-    .map((item) => `<span><i style="background:${item.color}"></i>${item.name}</span>`)
+    .map((item) => `<span><i style="background:${esc(item.color)}"></i>${esc(item.name)}</span>`)
     .join("");
   const last = state.bars.at(-1);
   const meta = state.meta;
   $("chartTitle").textContent = meta.symbol
-    ? `${meta.symbol} · ${meta.name || ""} · ${intervalLabel(state.interval)} · ${meta.adjusted ? "复权" : meta.source || ""}`
+    ? `${esc(meta.symbol)} · ${esc(meta.name || "")} · ${intervalLabel(state.interval)} · ${meta.adjusted ? "复权" : esc(meta.source || "")}`
     : "价格";
   if (last) {
     $("dataHint").textContent = `已加载 ${state.bars.length} 根 · ${state.bars[0].label} 至 ${last.label}${meta.cached ? " · 缓存" : ""}`;
@@ -668,17 +661,17 @@ function renderTrades() {
     return;
   }
   const rows = trades.map((trade) => `
-    <tr class="clickable" data-entry="${trade.entry_time}" data-exit="${trade.exit_time || trade.entry_time}">
+    <tr class="clickable" data-entry="${esc(trade.entry_time)}" data-exit="${esc(trade.exit_time || trade.entry_time)}">
       <td class="left">${trade.side === "long" ? "多" : "空"}${trade.open ? " · 未平" : ""}</td>
-      <td class="left">${trade.entry_label || ""}</td>
+      <td class="left">${esc(trade.entry_label || "")}</td>
       <td class="num">${fmt.px(trade.entry_price)}</td>
-      <td class="left">${trade.exit_label || "—"}</td>
+      <td class="left">${esc(trade.exit_label || "—")}</td>
       <td class="num">${fmt.px(trade.exit_price)}</td>
       <td class="num">${trade.qty}</td>
       <td class="num ${tone(trade.pnl)}">${fmt.usd2(trade.pnl)}</td>
       <td class="num ${tone(trade.return_pct)}">${fmt.pct(trade.return_pct)}</td>
       <td class="num">${trade.bars_held ?? "—"}</td>
-      <td class="left">${trade.note || ""}</td>
+      <td class="left">${esc(trade.note || "")}</td>
     </tr>`).join("");
   $("tab-trades").innerHTML = `<table><thead><tr><th class="left">方向</th><th class="left">开仓</th><th>开仓价</th><th class="left">平仓</th><th>平仓价</th><th>数量</th><th>盈亏</th><th>收益率</th><th>持有</th><th class="left">备注</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
@@ -696,17 +689,17 @@ function renderCompare() {
     boardHtml = `<p class="empty">${board.symbol} · 各策略默认参数 · 同一费用${board.allow_short ? " · 允许做空" : ""} · ${board.elapsed_ms} ms${bench ? ` · ${board.benchmark.label} ${fmt.pct(bench.total_return)}` : ""}。铜色是夏普最高。</p><table><thead><tr><th class="left">策略</th><th>参数</th><th>总收益</th><th>超额</th><th>最大回撤</th><th>夏普</th><th>交易</th><th>持仓占比</th></tr></thead><tbody>${
       board.rows.map((row) => {
         const m = row.metrics;
-        if (!m) return `<tr><td class="left">${row.name}</td><td colspan="7">${row.error || "没有结果"}</td></tr>`;
+        if (!m) return `<tr><td class="left">${esc(row.name)}</td><td colspan="7">${esc(row.error || "没有结果")}</td></tr>`;
         const excess = bench && Number.isFinite(m.total_return) ? m.total_return - bench.total_return : null;
         const mark = row.id === board.best_sharpe ? "best" : "";
         const closed = `${m.trades}${m.open_trades ? "+" + m.open_trades : ""}`;
-        return `<tr class="clickable ${mark}" data-strategy="${row.id}" title="${row.warning || ""}"><td class="left">${row.name}${row.origin === "user" ? " · 自定义" : ""}</td><td class="num">${paramText(row.params)}</td><td class="num ${tone(m.total_return)}">${fmt.pct(m.total_return)}</td><td class="num ${tone(excess)}">${fmt.pct(excess)}</td><td class="num down">${fmt.pct(m.max_drawdown)}</td><td class="num">${fmt.num(m.sharpe)}</td><td class="num" title="已平仓+仍持有">${closed}</td><td class="num">${fmt.pct(m.exposure)}</td></tr>`;
+        return `<tr class="clickable ${mark}" data-strategy="${esc(row.id)}" title="${esc(row.warning || "")}"><td class="left">${esc(row.name)}${row.origin === "user" ? " · 自定义" : ""}</td><td class="num">${esc(paramText(row.params))}</td><td class="num ${tone(m.total_return)}">${fmt.pct(m.total_return)}</td><td class="num ${tone(excess)}">${fmt.pct(excess)}</td><td class="num down">${fmt.pct(m.max_drawdown)}</td><td class="num">${fmt.num(m.sharpe)}</td><td class="num" title="已平仓+仍持有">${closed}</td><td class="num">${fmt.pct(m.exposure)}</td></tr>`;
       }).join("")
     }</tbody></table>`;
   }
   const pinHtml = state.pins.length
     ? `<table><thead><tr><th class="left">已叠曲线</th><th>总收益</th><th>最大回撤</th><th>夏普</th><th></th></tr></thead><tbody>${
-        state.pins.map((pin) => `<tr><td class="left"><i style="background:${pin.color};display:inline-block;width:8px;height:8px;margin-right:6px"></i>${pin.label}</td><td class="num ${tone(pin.metrics.total_return)}">${fmt.pct(pin.metrics.total_return)}</td><td class="num down">${fmt.pct(pin.metrics.max_drawdown)}</td><td class="num">${fmt.num(pin.metrics.sharpe)}</td><td><button class="text" data-remove="${pin.id}" type="button">移除</button></td></tr>`).join("")
+        state.pins.map((pin) => `<tr><td class="left"><i style="background:${pin.color};display:inline-block;width:8px;height:8px;margin-right:6px"></i>${esc(pin.label)}</td><td class="num ${tone(pin.metrics.total_return)}">${fmt.pct(pin.metrics.total_return)}</td><td class="num down">${fmt.pct(pin.metrics.max_drawdown)}</td><td class="num">${fmt.num(pin.metrics.sharpe)}</td><td><button class="text" data-remove="${esc(pin.id)}" type="button">移除</button></td></tr>`).join("")
       }</tbody></table>`
     : "";
   $("tab-compare").innerHTML = boardHtml + pinHtml;
@@ -720,7 +713,7 @@ function renderSweep(payload) {
   const rows = payload.rows.map((row) => {
     const m = row.metrics;
     const mark = row.value === payload.best_sharpe ? "best" : "";
-    return `<tr class="clickable ${mark}" data-sweep="${row.value}"><td class="num">${row.value}</td><td class="num ${tone(m.total_return)}">${fmt.pct(m.total_return)}</td><td class="num ${tone(m.cagr)}">${fmt.pct(m.cagr)}</td><td class="num down">${fmt.pct(m.max_drawdown)}</td><td class="num">${fmt.num(m.sharpe)}</td><td class="num">${fmt.pct(m.win_rate)}</td><td class="num">${m.trades}</td><td class="num">${fmt.usd(m.ending_equity)}</td></tr>`;
+    return `<tr class="clickable ${mark}" data-sweep="${esc(row.value)}"><td class="num">${row.value}</td><td class="num ${tone(m.total_return)}">${fmt.pct(m.total_return)}</td><td class="num ${tone(m.cagr)}">${fmt.pct(m.cagr)}</td><td class="num down">${fmt.pct(m.max_drawdown)}</td><td class="num">${fmt.num(m.sharpe)}</td><td class="num">${fmt.pct(m.win_rate)}</td><td class="num">${m.trades}</td><td class="num">${fmt.usd(m.ending_equity)}</td></tr>`;
   }).join("");
   $("sweepTable").innerHTML = `<table><thead><tr><th>${payload.label}</th><th>总收益</th><th>年化</th><th>最大回撤</th><th>夏普</th><th>胜率</th><th>交易</th><th>期末权益</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
@@ -1061,10 +1054,10 @@ function renderRobust(result) {
       ${tile("夏普中位数", fmt.num(s.median_sharpe))}
     </div>`;
   const rows = result.rows.map((row) => {
-    if (!row.ok) return `<tr><td class="left">${row.symbol}</td><td colspan="6">${row.error || "失败"}</td></tr>`;
-    return `<tr class="clickable" data-symbol="${row.symbol}">
+    if (!row.ok) return `<tr><td class="left">${esc(row.symbol)}</td><td colspan="6">${esc(row.error || "失败")}</td></tr>`;
+    return `<tr class="clickable" data-symbol="${esc(row.symbol)}">
       <td class="left">${row.symbol}</td>
-      <td class="left">${row.name || ""}</td>
+      <td class="left">${esc(row.name || "")}</td>
       <td class="num ${tone(row.total_return)}">${fmt.pct(row.total_return)}</td>
       <td class="num ${tone(row.excess)}">${fmt.pct(row.excess)}</td>
       <td class="num down">${fmt.pct(row.max_drawdown)}</td>
@@ -1096,10 +1089,10 @@ function renderPaper(account) {
     <div><span>总盈亏</span><strong class="num ${tone(account.pnl)}">${paperMoney(account.pnl)}</strong></div>
     <div><span>浮动盈亏</span><strong class="num ${tone(account.unrealized)}">${paperMoney(account.unrealized)}</strong></div>`;
   $("paperPositions").innerHTML = account.positions.length
-    ? `<table><thead><tr><th class="left">代码</th><th>数量</th><th>成本</th><th>现价</th><th>浮动</th></tr></thead><tbody>${account.positions.map((pos) => `<tr><td class="left">${pos.symbol}</td><td class="num">${pos.qty}</td><td class="num">${fmt.px(pos.avg_price)}</td><td class="num">${fmt.px(pos.last)}</td><td class="num ${tone(pos.unrealized)}">${paperMoney(pos.unrealized)}</td></tr>`).join("")}</tbody></table>`
+    ? `<table><thead><tr><th class="left">代码</th><th>数量</th><th>成本</th><th>现价</th><th>浮动</th></tr></thead><tbody>${account.positions.map((pos) => `<tr><td class="left">${esc(pos.symbol)}</td><td class="num">${pos.qty}</td><td class="num">${fmt.px(pos.avg_price)}</td><td class="num">${fmt.px(pos.last)}</td><td class="num ${tone(pos.unrealized)}">${paperMoney(pos.unrealized)}</td></tr>`).join("")}</tbody></table>`
     : `<p class="empty">还没有持仓。</p>`;
   $("paperOrders").innerHTML = account.orders.length
-    ? `<table><thead><tr><th class="left">时间</th><th class="left">代码</th><th>方向</th><th>数量</th><th>成交价</th></tr></thead><tbody>${account.orders.map((order) => `<tr><td class="left">${order.time}</td><td class="left">${order.symbol}</td><td>${order.side === "buy" ? "买" : "卖"}</td><td class="num">${order.qty}</td><td class="num">${fmt.px(order.price)}</td></tr>`).join("")}</tbody></table>`
+    ? `<table><thead><tr><th class="left">时间</th><th class="left">代码</th><th>方向</th><th>数量</th><th>成交价</th></tr></thead><tbody>${account.orders.map((order) => `<tr><td class="left">${esc(order.time)}</td><td class="left">${esc(order.symbol)}</td><td>${order.side === "buy" ? "买" : "卖"}</td><td class="num">${order.qty}</td><td class="num">${fmt.px(order.price)}</td></tr>`).join("")}</tbody></table>`
     : "";
   if (account.warning) showBanner(account.warning);
 }
@@ -1170,7 +1163,7 @@ async function searchSymbols() {
     }
     box.hidden = false;
     box.innerHTML = results
-      .map((item) => `<button type="button" data-symbol="${item.symbol}"><b>${item.symbol}</b> ${item.name} · ${item.type}</button>`)
+      .map((item) => `<button type="button" data-symbol="${esc(item.symbol)}"><b>${esc(item.symbol)}</b> ${esc(item.name)} · ${esc(item.type)}</button>`)
       .join("");
   } catch (error) {
     showBanner(error.message, "error");
@@ -1374,7 +1367,7 @@ async function init() {
     const data = { strategies: Engine.strategyCatalog(), warnings: [] };
     state.strategies = data.strategies;
     $("strategySelect").innerHTML = data.strategies
-      .map((item) => `<option value="${item.id}">${item.name}${item.origin === "user" ? " · 自定义" : ""}</option>`)
+      .map((item) => `<option value="${esc(item.id)}">${esc(item.name)}${item.origin === "user" ? " · 自定义" : ""}</option>`)
       .join("");
     if (saved?.strategy) $("strategySelect").value = saved.strategy;
     state.savedParams = saved?.params || null;
