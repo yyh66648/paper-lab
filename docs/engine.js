@@ -497,6 +497,8 @@ class PositionBook {
   }
 
   makeTrade(side, qty, exitPrice, pnl, cost, fill, isOpen) {
+    const exitNote = isOpen ? "" : (fill.note || "");
+    const parts = [this.note, exitNote].filter(Boolean);
     return {
       side,
       entryTime: this.entryTime,
@@ -509,7 +511,9 @@ class PositionBook {
       pnl,
       returnPct: cost ? pnl / cost : null,
       barsHeld: this.entryIndex === null ? null : fill.barIndex - this.entryIndex,
-      note: this.note,
+      note: parts.join(" → "),
+      entryNote: this.note,
+      exitNote,
       open: isOpen,
     };
   }
@@ -560,7 +564,10 @@ function makeView(i, arrays, position, cash, equity, symbol) {
   return view;
 }
 
-function simulate(bars, strategy, cash, commissionRate, slippageBps, allowShort, symbol) {
+function simulate(bars, strategy, cash, commissionRate, slippageBps, allowShort, symbol, risk = {}) {
+  const stopLoss = Number(risk.stopLossPct) > 0 ? Number(risk.stopLossPct) / 100 : 0;
+  const takeProfit = Number(risk.takeProfitPct) > 0 ? Number(risk.takeProfitPct) / 100 : 0;
+  const slip = slippageBps / 10000;
   const arrays = {
     opens: bars.map((bar) => bar.o),
     highs: bars.map((bar) => bar.h),
@@ -605,6 +612,53 @@ function simulate(bars, strategy, cash, commissionRate, slippageBps, allowShort,
       }
       pending = null;
       pendingNote = "";
+    }
+    // 止损止盈：当根的最高最低价已经碰到阈值，就按触发价平掉，不用等下一根开盘。
+    if (position !== 0 && book.avg > 0 && (stopLoss > 0 || takeProfit > 0)) {
+      const long = position > 0;
+      const stopPx = long ? book.avg * (1 - stopLoss) : book.avg * (1 + stopLoss);
+      const takePx = long ? book.avg * (1 + takeProfit) : book.avg * (1 - takeProfit);
+      const openPx = bar.o || bar.c;
+      let exitPx = null;
+      let reason = "";
+      if (long) {
+        if (stopLoss > 0 && bar.l <= stopPx) {
+          exitPx = Math.min(openPx, stopPx);
+          reason = "止损";
+        } else if (takeProfit > 0 && bar.h >= takePx) {
+          exitPx = Math.max(openPx, takePx);
+          reason = "止盈";
+        }
+      } else if (stopLoss > 0 && bar.h >= stopPx) {
+        exitPx = Math.max(openPx, stopPx);
+        reason = "止损";
+      } else if (takeProfit > 0 && bar.l <= takePx) {
+        exitPx = Math.min(openPx, takePx);
+        reason = "止盈";
+      }
+      if (exitPx !== null) {
+        const qty = Math.abs(position);
+        const fillPx = long ? exitPx * (1 - slip) : exitPx * (1 + slip);
+        const fee = qty * fillPx * commissionRate;
+        cash += (long ? 1 : -1) * qty * fillPx - fee;
+        const fill = {
+          side: long ? "sell" : "buy",
+          qty,
+          price: fillPx,
+          fee,
+          t: bar.t,
+          label: bar.label,
+          barIndex: i,
+          note: reason,
+        };
+        position = 0;
+        fees += fee;
+        book.apply(fill);
+        markers.push({ t: bar.t, label: bar.label, side: fill.side, price: fillPx, qty, note: reason });
+        lastSignal = 0;
+        pending = null;
+        pendingNote = "";
+      }
     }
     const mark = bar.c ? bar.c : arrays.opens[i] || 0;
     const equity = cash + position * (mark || 0);
@@ -673,6 +727,8 @@ function runBacktest(bars, strategy, options = {}) {
     benchBars = null,
     symbol = "",
     includeBenchmark = true,
+    stopLossPct = 0,
+    takeProfitPct = 0,
   } = options;
   if (!bars || bars.length < 2) throw new Error("K 线不足，无法回测。");
   const opens = bars.map((bar) => bar.o);
@@ -683,7 +739,10 @@ function runBacktest(bars, strategy, options = {}) {
   strategy.prepare(closes, highs, lows, volumes);
 
   const commissionRate = commissionBps / 10000;
-  const result = simulate(bars, strategy, Number(cash), commissionRate, slippageBps, allowShort, symbol);
+  const result = simulate(bars, strategy, Number(cash), commissionRate, slippageBps, allowShort, symbol, {
+    stopLossPct,
+    takeProfitPct,
+  });
   let benchValues;
   let benchFees;
   if (includeBenchmark) {

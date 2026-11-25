@@ -111,6 +111,8 @@ function assumptions() {
     slippage_bps: Number($("slippage").value),
     allow_short: $("allowShort").checked,
     benchmark: $("benchmark").value,
+    stopLossPct: Number($("stopLoss").value) || 0,
+    takeProfitPct: Number($("takeProfit").value) || 0,
   };
 }
 
@@ -774,6 +776,8 @@ async function runBacktest() {
       benchBars,
       benchSymbol,
       benchLabel,
+      stopLossPct: opts.stopLossPct,
+      takeProfitPct: opts.takeProfitPct,
     });
     if (token !== state.runToken) return;
     state.result = result;
@@ -1325,6 +1329,8 @@ async function init() {
   if (saved?.commission_bps != null) $("commission").value = saved.commission_bps;
   if (saved?.slippage_bps != null) $("slippage").value = saved.slippage_bps;
   if (saved?.allow_short) $("allowShort").checked = true;
+  if (saved?.stopLossPct != null) $("stopLoss").value = saved.stopLossPct;
+  if (saved?.takeProfitPct != null) $("takeProfit").value = saved.takeProfitPct;
   if (saved?.benchmark) $("benchmark").value = saved.benchmark;
   state.market = saved?.market === "cn" ? "cn" : "us";
   state.symbol = (saved?.symbol || (state.market === "cn" ? "600519.SH" : "NVDA")).toUpperCase();
