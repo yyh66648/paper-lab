@@ -168,7 +168,24 @@ function renderQuote() {
     <span class="px num ${tone(change)}">${fmt.money(price, quote?.currency || currency(), Math.abs(price) >= 100 ? 2 : 2)}</span>
     <span class="num ${tone(change)}">${fmt.pct(change)}</span>
     <span class="name">${name}${quote?.exchange ? " · " + quote.exchange : ""}</span>`;
-  $("dataSource").textContent = meta.source ? `${meta.source}${meta.adjusted ? " · 复权" : ""}` : "行情未连接";
+  const lastLabel = meta.end || state.bars.at(-1)?.label || "";
+  const staleDays = stalenessDays(lastLabel);
+  const freshTag = state.market === "us" && staleDays !== null
+    ? (staleDays <= 1 ? " · 最新" : staleDays <= 4 ? ` · 落后 ${staleDays} 天` : ` · 已过时 ${staleDays} 天`)
+    : "";
+  $("dataSource").textContent = meta.source
+    ? `${meta.source}${meta.adjusted ? " · 复权" : ""}${freshTag}`
+    : "行情未连接";
+  $("dataSource").className = state.market === "us" && staleDays > 4 ? "stale" : "";
+}
+
+function stalenessDays(label) {
+  if (!label) return null;
+  const date = new Date(String(label).slice(0, 10) + "T00:00:00Z");
+  if (Number.isNaN(date.getTime())) return null;
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return Math.max(0, Math.round((todayUtc - date.getTime()) / 86400000));
 }
 
 function renderStrategyForm() {

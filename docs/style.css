@@ -78,6 +78,7 @@ button { cursor: pointer; }
   letter-spacing: 0.08em;
   font-size: 11px;
 }
+.top-meta #dataSource.stale { color: var(--down); }
 
 .shell {
   min-height: 0;
