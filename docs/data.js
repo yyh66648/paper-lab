@@ -274,7 +274,10 @@ async function searchSymbols(query, market) {
   return results.slice(0, 8);
 }
 
-const Data = { loadBars, loadQuote, searchSymbols, isCnSymbol, canonicalCn, CN_WATCH };
+const Data = {
+  loadBars, loadQuote, searchSymbols, isCnSymbol, canonicalCn, CN_WATCH,
+  loadStockIndex: loadStaticIndex,
+};
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = { isCnSymbol, canonicalCn, tencentCode, CN_WATCH };

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
@@ -155,6 +155,7 @@
       <button type="button" data-tab="trades" class="on">成交</button>
       <button type="button" data-tab="compare">对比</button>
       <button type="button" data-tab="sweep">参数扫描</button>
+      <button type="button" data-tab="robust">稳健性</button>
       <div class="spacer"></div>
       <button id="exportTrades" class="text" type="button">下载成交</button>
       <button id="exportMetrics" class="text" type="button">下载绩效</button>
@@ -171,6 +172,21 @@
           <button id="sweepBtn" class="primary" type="button">扫描</button>
         </div>
         <div id="sweepTable"></div>
+      </div>
+      <div id="tab-robust" hidden>
+        <div class="sweep-form">
+          <label>样本池
+            <select id="robustScope">
+              <option value="all">股票池全部</option>
+              <option value="stocks">只看股票</option>
+              <option value="etfs">只看 ETF</option>
+            </select>
+          </label>
+          <span class="quiet" id="robustHint">用当前策略和参数，逐只跑一遍，看是不是只在个别标的上有效。</span>
+          <button id="robustBtn" class="primary" type="button">跑一遍</button>
+        </div>
+        <div id="robustSummary"></div>
+        <div id="robustTable"></div>
       </div>
     </div>
   </section>

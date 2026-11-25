@@ -1,4 +1,4 @@
-﻿const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 const WATCH = {
   us: ["NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "AMD", "SPY", "QQQ"],
   cn: ["600519.SH", "000001.SZ", "300750.SZ", "601318.SH", "000858.SZ", "002594.SZ", "510300.SH", "510050.SH", "159915.SZ"],
@@ -838,7 +838,7 @@ async function runSweep() {
 
 function showTab(name) {
   document.querySelectorAll(".blotter-tabs [data-tab]").forEach((item) => item.classList.toggle("on", item.dataset.tab === name));
-  ["trades", "compare", "sweep"].forEach((tab) => {
+  ["trades", "compare", "sweep", "robust"].forEach((tab) => {
     $("tab-" + tab).hidden = tab !== name;
   });
 }
@@ -875,6 +875,93 @@ async function compareAll() {
     $("compareAllBtn").disabled = false;
     $("compareAllBtn").textContent = "跑全部策略";
   }
+}
+
+async function runRobust() {
+  if (!state.meta?.bars) {
+    showBanner("先加载一只标的，再跑股票池。");
+    return;
+  }
+  const opts = assumptions();
+  const scope = $("robustScope").value;
+  let pool = [];
+  if (state.market === "cn") {
+    pool = Data.CN_WATCH.map(([symbol]) => symbol);
+  } else {
+    try {
+      const index = await Data.loadStockIndex();
+      pool = (index.symbols || [])
+        .filter((item) => scope === "all" || (scope === "etfs" ? item.type === "ETF" : item.type !== "ETF"))
+        .map((item) => item.symbol);
+    } catch (error) {
+      showBanner("股票池清单加载失败：" + error.message, "error");
+      return;
+    }
+  }
+  if (scope !== "all" && state.market === "cn") {
+    // A 股清单不分股票和 ETF，筛选交给逐只判断，这里全跑。
+    pool = Data.CN_WATCH.map(([symbol]) => symbol);
+  }
+  $("robustBtn").disabled = true;
+  $("robustTable").innerHTML = "";
+  $("robustSummary").innerHTML = `<p class="empty">正在跑 ${pool.length} 只…</p>`;
+  try {
+    const result = await Bridge.batch({
+      symbols: pool,
+      interval: state.interval,
+      start: $("startDate").value,
+      end: $("endDate").value,
+      strategyId: $("strategySelect").value,
+      params: readParams(),
+      cash: opts.cash,
+      commissionBps: opts.commission_bps,
+      slippageBps: opts.slippage_bps,
+      allowShort: opts.allow_short,
+      onProgress: (done, total) => {
+        $("robustSummary").innerHTML = `<p class="empty">已跑 ${done} / ${total}…</p>`;
+      },
+    });
+    state.robust = result;
+    renderRobust(result);
+    showBanner(`跑完 ${result.summary.ok} 只，${result.summary.positive} 只正收益。`);
+  } catch (error) {
+    showBanner(error.message, "error");
+    $("robustSummary").innerHTML = "";
+  } finally {
+    $("robustBtn").disabled = false;
+  }
+}
+
+function renderRobust(result) {
+  if (!result) {
+    $("robustSummary").innerHTML = "";
+    $("robustTable").innerHTML = "";
+    return;
+  }
+  const s = result.summary;
+  const tile = (label, value, cls = "") => `<div><span>${label}</span><strong class="num ${cls}">${value}</strong></div>`;
+  $("robustSummary").innerHTML = `
+    <div class="paper-summary" style="margin:8px 0">
+      ${tile("样本", `${s.ok}/${s.total}`)}
+      ${tile("正收益", `${s.positive}（${fmt.pct(s.positive_rate).replace("+", "")}）`, tone(s.positive_rate - 0.5))}
+      ${tile("收益中位数", fmt.pct(s.median_return), tone(s.median_return))}
+      ${tile("跑赢持有", `${s.beat_hold}（${fmt.pct(s.beat_hold_rate).replace("+", "")}）`, tone(s.beat_hold_rate - 0.5))}
+      ${tile("超额中位数", fmt.pct(s.median_excess), tone(s.median_excess))}
+      ${tile("夏普中位数", fmt.num(s.median_sharpe))}
+    </div>`;
+  const rows = result.rows.map((row) => {
+    if (!row.ok) return `<tr><td class="left">${row.symbol}</td><td colspan="6">${row.error || "失败"}</td></tr>`;
+    return `<tr class="clickable" data-symbol="${row.symbol}">
+      <td class="left">${row.symbol}</td>
+      <td class="left">${row.name || ""}</td>
+      <td class="num ${tone(row.total_return)}">${fmt.pct(row.total_return)}</td>
+      <td class="num ${tone(row.excess)}">${fmt.pct(row.excess)}</td>
+      <td class="num down">${fmt.pct(row.max_drawdown)}</td>
+      <td class="num">${fmt.num(row.sharpe)}</td>
+      <td class="num">${row.trades}</td>
+    </tr>`;
+  }).join("");
+  $("robustTable").innerHTML = `<p class="empty">点一行可以切到那只标的。</p><table><thead><tr><th class="left">代码</th><th class="left">名称</th><th>收益</th><th>超额</th><th>最大回撤</th><th>夏普</th><th>成交</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 async function refreshPaper() {
@@ -1054,7 +1141,7 @@ function bind() {
     const button = event.target.closest("[data-tab]");
     if (!button) return;
     document.querySelectorAll(".blotter-tabs [data-tab]").forEach((item) => item.classList.toggle("on", item === button));
-    ["trades", "compare", "sweep"].forEach((name) => {
+    ["trades", "compare", "sweep", "robust"].forEach((name) => {
       $("tab-" + name).hidden = name !== button.dataset.tab;
     });
   };
@@ -1079,6 +1166,14 @@ function bind() {
   };
   $("compareAllBtn").onclick = compareAll;
   $("sweepBtn").onclick = runSweep;
+  $("robustBtn").onclick = runRobust;
+  $("robustTable").onclick = async (event) => {
+    const row = event.target.closest("tr[data-symbol]");
+    if (!row) return;
+    $("symbolInput").value = row.dataset.symbol;
+    await loadBars(false);
+    showTab("robust");
+  };
   $("sweepParam").onchange = () => {
     const spec = (currentStrategy()?.params || []).find((item) => item.key === $("sweepParam").value);
     if (!spec) return;

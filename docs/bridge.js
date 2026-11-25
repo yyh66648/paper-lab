@@ -168,8 +168,7 @@ const Bridge = {
     };
   },
 
-  sweep({ symbol, interval, start, end, meta, strategyId, params, cash, commissionBps, slippageBps, allowShort, sweepKey, min, max, step }) {
-    const catalog = Engine.strategyCatalog();
+  sweep({ symbol, interval, start, end, meta, strategyId, params, cash, commissionBps, slippageBps, allowShort, sweepKey, min, max, step }) {    const catalog = Engine.strategyCatalog();
     const schema = (catalog.find((item) => item.id === strategyId) || {}).params || [];
     const spec = schema.find((item) => item.key === sweepKey);
     if (!spec || spec.type === "bool") throw new Error("请选择一个数字参数来扫描。");
@@ -198,6 +197,87 @@ const Bridge = {
       best_sharpe: bestSharpe,
       best_return: bestReturn,
       warning: meta.warning || null,
+    };
+  },
+
+  /* 把同一套参数跑遍一批标的，看它是不是只对某一只有效。 */
+  async batch({ symbols, interval, start, end, strategyId, params, cash, commissionBps, slippageBps, allowShort, onProgress }) {
+    const rows = [];
+    const queue = symbols.slice();
+    let done = 0;
+    const total = queue.length;
+
+    const worker = async () => {
+      while (queue.length) {
+        const symbol = queue.shift();
+        try {
+          const meta = await Data.loadBars(symbol, interval, start, end);
+          const { strategy } = Engine.createStrategy(strategyId, params);
+          const raw = Engine.runBacktest(meta.bars, strategy, {
+            cash, commissionBps, slippageBps, allowShort, symbol,
+          });
+          const metrics = Engine.summarize(cash, raw.equity, raw.trades, raw.fees, interval);
+          const holdReturn = Engine.summarize(
+            cash,
+            Engine.equityRowsFromValues(raw.equity, raw.benchEquity, cash),
+            [],
+            raw.benchFees,
+            interval,
+          ).totalReturn;
+          rows.push({
+            symbol: meta.symbol,
+            name: meta.name || meta.symbol,
+            currency: meta.currency,
+            bars: meta.bars.length,
+            total_return: metrics.totalReturn,
+            max_drawdown: metrics.maxDrawdown,
+            sharpe: metrics.sharpe,
+            trades: metrics.trades,
+            exposure: metrics.exposure,
+            hold_return: holdReturn,
+            excess: metrics.totalReturn !== null && holdReturn !== null ? metrics.totalReturn - holdReturn : null,
+            ok: true,
+          });
+        } catch (error) {
+          rows.push({ symbol, name: symbol, ok: false, error: error.message });
+        }
+        done++;
+        if (onProgress) onProgress(done, total);
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(4, total) }, worker));
+    rows.sort((a, b) => (Number.isFinite(b.total_return) ? b.total_return : -999) - (Number.isFinite(a.total_return) ? a.total_return : -999));
+    const valid = rows.filter((row) => row.ok && Number.isFinite(row.total_return));
+    const median = (values) => {
+      if (!values.length) return null;
+      const sorted = values.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    };
+    const returns = valid.map((row) => row.total_return);
+    const sharpes = valid.filter((row) => Number.isFinite(row.sharpe)).map((row) => row.sharpe);
+    const excesses = valid.filter((row) => Number.isFinite(row.excess)).map((row) => row.excess);
+    return {
+      rows,
+      summary: {
+        total,
+        ok: valid.length,
+        failed: rows.length - valid.length,
+        positive: returns.filter((value) => value > 0).length,
+        positive_rate: returns.length ? returns.filter((value) => value > 0).length / returns.length : null,
+        median_return: median(returns),
+        best: valid[0] || null,
+        worst: valid.length ? valid[valid.length - 1] : null,
+        median_sharpe: median(sharpes),
+        beat_hold: excesses.filter((value) => value > 0).length,
+        beat_hold_rate: excesses.length ? excesses.filter((value) => value > 0).length / excesses.length : null,
+        median_excess: median(excesses),
+      },
+      interval,
+      strategy: strategyId,
+      params,
+      elapsed_ms: null,
     };
   },
 };
