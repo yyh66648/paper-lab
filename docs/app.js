@@ -182,16 +182,41 @@ function renderStrategyForm() {
     })
     .join("");
   const numeric = (strategy.params || []).filter((spec) => spec.type !== "bool");
-  $("sweepParam").innerHTML = numeric
+  const options = numeric
     .map((spec) => `<option value="${spec.key}">${spec.label}</option>`)
     .join("");
+  $("sweepParam").innerHTML = options;
+  $("sweepParam2").innerHTML = options;
   const first = numeric[0];
   if (first) {
     $("sweepMin").value = first.min ?? first.default;
     $("sweepMax").value = first.max ?? first.default;
     $("sweepStep").value = first.step || 1;
   }
+  const second = numeric[1] || numeric[0];
+  if (second) {
+    $("sweepParam2").value = second.key;
+    $("sweepMin2").value = second.min ?? second.default;
+    $("sweepMax2").value = second.max ?? second.default;
+    $("sweepStep2").value = (second.step || 1) * 5;
+  }
+  $("sweepMode").value = numeric.length > 1 ? $("sweepMode").value : "1";
+  applySweepMode();
   state.savedParams = null;
+}
+
+function applySweepMode() {
+  const twoD = $("sweepMode").value === "2";
+  document.querySelectorAll("#tab-sweep .two-d").forEach((item) => { item.hidden = !twoD; });
+}
+
+function sweepAxis(spec, minId, maxId, stepId) {
+  if (!spec) return null;
+  const min = Number($(minId).value);
+  const max = Number($(maxId).value);
+  const step = Number($(stepId).value);
+  if (!(step > 0) || !(max >= min)) return null;
+  return { min, max, step };
 }
 
 function setView(start, end) {
@@ -804,10 +829,36 @@ async function runSweep() {
     return;
   }
   const opts = assumptions();
+  const mode = $("sweepMode").value;
   $("sweepBtn").disabled = true;
   $("sweepBtn").textContent = "扫描中…";
   await new Promise((resolve) => setTimeout(resolve, 0));
   try {
+    if (mode === "2") {
+      const payload = Bridge.heatmap({
+        symbol: state.symbol,
+        interval: state.interval,
+        meta: state.meta,
+        strategyId: $("strategySelect").value,
+        params: readParams(),
+        cash: opts.cash,
+        commissionBps: opts.commission_bps,
+        slippageBps: opts.slippage_bps,
+        allowShort: opts.allow_short,
+        xKey: $("sweepParam").value,
+        yKey: $("sweepParam2").value,
+        xMin: Number($("sweepMin").value),
+        xMax: Number($("sweepMax").value),
+        xStep: Number($("sweepStep").value),
+        yMin: Number($("sweepMin2").value),
+        yMax: Number($("sweepMax2").value),
+        yStep: Number($("sweepStep2").value),
+      });
+      state.heatmap = payload;
+      renderHeatmap(payload);
+      showBanner(`二维扫描完成，${payload.xValues.length}×${payload.yValues.length} = ${payload.cells.length} 组。夏普最好的一组在 ${payload.best.x} / ${payload.best.y}。`);
+      return;
+    }
     const payload = Bridge.sweep({
       symbol: state.symbol,
       interval: state.interval,
@@ -834,6 +885,41 @@ async function runSweep() {
     $("sweepBtn").disabled = false;
     $("sweepBtn").textContent = "扫描";
   }
+}
+
+function heatColor(value, min, max) {
+  if (!Number.isFinite(value)) return "transparent";
+  const span = Math.max(Math.abs(max), Math.abs(min), 1e-9);
+  const norm = Math.min(1, Math.abs(value) / span);
+  const alpha = 0.12 + 0.5 * norm;
+  return value >= 0 ? `rgba(60, 186, 132, ${alpha.toFixed(3)})` : `rgba(225, 93, 104, ${alpha.toFixed(3)})`;
+}
+
+function renderHeatmap(payload) {
+  if (!payload) {
+    $("sweepTable").innerHTML = "";
+    return;
+  }
+  const metric = $("sweepMetric").value;
+  const values = payload.cells.map((cell) => cell[metric]).filter((value) => Number.isFinite(value));
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 0;
+  const show = (value) => (metric === "total_return" ? fmt.pct(value) : metric === "max_drawdown" ? fmt.pct(value) : fmt.num(value));
+  const head = `<tr><th class="left">${payload.yLabel} \\ ${payload.xLabel}</th>${payload.xValues.map((x) => `<th class="num">${x}</th>`).join("")}</tr>`;
+  const body = payload.yValues
+    .map((y) => {
+      const cells = payload.xValues
+        .map((x) => {
+          const cell = payload.cells.find((item) => item.x === x && item.y === y);
+          if (!cell) return `<td></td>`;
+          const best = payload.best && cell.x === payload.best.x && cell.y === payload.best.y;
+          return `<td class="num heat" data-x="${cell.x}" data-y="${cell.y}" style="background:${heatColor(cell[metric], min, max)}">${show(cell[metric])}${best ? " ●" : ""}</td>`;
+        })
+        .join("");
+      return `<tr><th class="num left">${y}</th>${cells}</tr>`;
+    })
+    .join("");
+  $("sweepTable").innerHTML = `<p class="empty">点格子会把这组参数填回表单并重跑。● 是夏普最好的一组。</p><table class="heatmap"><thead>${head}</thead><tbody>${body}</tbody></table>`;
 }
 
 function showTab(name) {
@@ -1166,6 +1252,13 @@ function bind() {
   };
   $("compareAllBtn").onclick = compareAll;
   $("sweepBtn").onclick = runSweep;
+  $("sweepParam").onchange = () => {
+    const spec = (currentStrategy()?.params || []).find((item) => item.key === $("sweepParam").value);
+    if (!spec) return;
+    $("sweepMin").value = spec.min ?? spec.default;
+    $("sweepMax").value = spec.max ?? spec.default;
+    $("sweepStep").value = spec.step || 1;
+  };
   $("robustBtn").onclick = runRobust;
   $("robustTable").onclick = async (event) => {
     const row = event.target.closest("tr[data-symbol]");
@@ -1174,14 +1267,26 @@ function bind() {
     await loadBars(false);
     showTab("robust");
   };
-  $("sweepParam").onchange = () => {
-    const spec = (currentStrategy()?.params || []).find((item) => item.key === $("sweepParam").value);
+  $("sweepMode").onchange = applySweepMode;
+  $("sweepParam2").onchange = () => {
+    const spec = (currentStrategy()?.params || []).find((item) => item.key === $("sweepParam2").value);
     if (!spec) return;
-    $("sweepMin").value = spec.min ?? spec.default;
-    $("sweepMax").value = spec.max ?? spec.default;
-    $("sweepStep").value = spec.step || 1;
+    $("sweepMin2").value = spec.min ?? spec.default;
+    $("sweepMax2").value = spec.max ?? spec.default;
+    $("sweepStep2").value = (spec.step || 1) * 5;
   };
   $("sweepTable").onclick = async (event) => {
+    const cell = event.target.closest("td[data-x]");
+    if (cell && state.heatmap) {
+      const setValue = (key, value) => {
+        const input = $("paramForm").querySelector(`[data-key="${key}"]`);
+        if (input) input.value = value;
+      };
+      setValue(state.heatmap.xKey, cell.dataset.x);
+      setValue(state.heatmap.yKey, cell.dataset.y);
+      await runBacktest();
+      return;
+    }
     const row = event.target.closest("tr[data-sweep]");
     if (!row) return;
     const input = $("paramForm").querySelector(`[data-key="${$("sweepParam").value}"]`);

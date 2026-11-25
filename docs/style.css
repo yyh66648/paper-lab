@@ -271,6 +271,11 @@ tr.clickable:hover td { background: #1a222e; }
 .sweep-form label { min-width: 90px; }
 .sweep-form button { height: 32px; }
 .best { color: var(--accent); }
+table.heatmap { border-collapse: separate; border-spacing: 1px; }
+table.heatmap th, table.heatmap td { border: 0; padding: 4px 5px; font-size: 11px; }
+table.heatmap th.left { background: transparent; position: static; }
+table.heatmap td.heat { cursor: pointer; border-radius: 3px; }
+table.heatmap td.heat:hover { outline: 1px solid var(--accent); }
 
 @media (max-width: 1180px) {
   body { display: block; height: auto; overflow: auto; min-width: 0; }

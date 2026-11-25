@@ -165,10 +165,27 @@
       <div id="tab-compare" hidden></div>
       <div id="tab-sweep" hidden>
         <div class="sweep-form">
-          <label>参数<select id="sweepParam"></select></label>
-          <label>最小<input id="sweepMin" type="number" /></label>
-          <label>最大<input id="sweepMax" type="number" /></label>
-          <label>步长<input id="sweepStep" type="number" /></label>
+          <label>维度
+            <select id="sweepMode">
+              <option value="1">一维</option>
+              <option value="2">二维</option>
+            </select>
+          </label>
+          <label>X 参数<select id="sweepParam"></select></label>
+          <label>X 最小<input id="sweepMin" type="number" /></label>
+          <label>X 最大<input id="sweepMax" type="number" /></label>
+          <label>X 步长<input id="sweepStep" type="number" /></label>
+          <label class="two-d" hidden>Y 参数<select id="sweepParam2"></select></label>
+          <label class="two-d" hidden>Y 最小<input id="sweepMin2" type="number" /></label>
+          <label class="two-d" hidden>Y 最大<input id="sweepMax2" type="number" /></label>
+          <label class="two-d" hidden>Y 步长<input id="sweepStep2" type="number" /></label>
+          <label>看
+            <select id="sweepMetric">
+              <option value="sharpe">夏普</option>
+              <option value="total_return">收益</option>
+              <option value="max_drawdown">回撤</option>
+            </select>
+          </label>
           <button id="sweepBtn" class="primary" type="button">扫描</button>
         </div>
         <div id="sweepTable"></div>

@@ -200,6 +200,64 @@ const Bridge = {
     };
   },
 
+  /* 二维参数扫描：看参数组合里有没有一块稳定的平原，而不是只有一根尖刺。 */
+  heatmap({ symbol, interval, meta, strategyId, params, cash, commissionBps, slippageBps, allowShort, xKey, yKey, xMin, xMax, xStep, yMin, yMax, yStep }) {
+    const catalog = Engine.strategyCatalog();
+    const schema = (catalog.find((item) => item.id === strategyId) || {}).params || [];
+    const specX = schema.find((item) => item.key === xKey);
+    const specY = schema.find((item) => item.key === yKey);
+    if (!specX || !specY) throw new Error("请选择两个数字参数。");
+    if (xKey === yKey) throw new Error("X 和 Y 要选不同的参数。");
+    for (const [step, lo, hi] of [[xStep, xMin, xMax], [yStep, yMin, yMax]]) {
+      if (!(step > 0)) throw new Error("步长必须大于 0。");
+      if (hi < lo) throw new Error("最大值不能小于最小值。");
+    }
+    const axis = (spec, min, max, step) => {
+      const count = Math.round((max - min) / step) + 1;
+      return Array.from({ length: count }, (_, i) =>
+        spec.type === "int" ? Math.round(min + i * step) : Math.round((min + i * step) * 10000) / 10000
+      );
+    };
+    const xValues = axis(specX, xMin, xMax, xStep);
+    const yValues = axis(specY, yMin, yMax, yStep);
+    if (xValues.length * yValues.length > 80) {
+      throw new Error(`一共 ${xValues.length * yValues.length} 组，超过 80 组了，把步长放大些。`);
+    }
+    const cells = [];
+    let best = null;
+    let bestScore = -Infinity;
+    for (const y of yValues) {
+      for (const x of xValues) {
+        const trial = { ...params, [xKey]: x, [yKey]: y };
+        const { strategy } = Engine.createStrategy(strategyId, trial);
+        const raw = Engine.runBacktest(meta.bars, strategy, {
+          cash, commissionBps, slippageBps, allowShort, includeBenchmark: false, symbol,
+        });
+        const metrics = Engine.summarize(cash, raw.equity, raw.trades, raw.fees, interval);
+        const cell = {
+          x, y,
+          total_return: metrics.totalReturn,
+          sharpe: metrics.sharpe,
+          max_drawdown: metrics.maxDrawdown,
+          trades: metrics.trades,
+          win_rate: metrics.winRate,
+        };
+        cells.push(cell);
+        const score = metrics.sharpe ?? -Infinity;
+        if (score > bestScore) {
+          bestScore = score;
+          best = cell;
+        }
+      }
+    }
+    return {
+      xKey, yKey,
+      xLabel: specX.label || xKey,
+      yLabel: specY.label || yKey,
+      xValues, yValues, cells, best,
+    };
+  },
+
   /* 把同一套参数跑遍一批标的，看它是不是只对某一只有效。 */
   async batch({ symbols, interval, start, end, strategyId, params, cash, commissionBps, slippageBps, allowShort, onProgress }) {
     const rows = [];
