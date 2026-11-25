@@ -1,4 +1,4 @@
-﻿const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 const WATCH = {
   us: ["NVDA", "AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "AMD", "SPY", "QQQ"],
   cn: ["600519.SH", "000001.SZ", "300750.SZ", "601318.SH", "000858.SZ", "002594.SZ", "510300.SH", "510050.SH", "159915.SZ"],
@@ -192,7 +192,8 @@ function renderStrategyForm() {
       if (spec.type === "bool") {
         return `<label class="check"><input data-key="${spec.key}" type="checkbox" ${value ? "checked" : ""}/> ${spec.label}</label>`;
       }
-      return `<label>${spec.label}<input data-key="${spec.key}" type="number" value="${value}" min="${spec.min ?? ""}" max="${spec.max ?? ""}" step="${spec.step || (spec.type === "int" ? 1 : 0.1)}" /></label>`;
+      const hint = spec.hint ? ` title="${esc(spec.hint)}"` : "";
+      return `<label${hint}>${esc(spec.label)}<input data-key="${esc(spec.key)}" type="number" value="${esc(value)}" min="${spec.min ?? ""}" max="${spec.max ?? ""}" step="${spec.step || (spec.type === "int" ? 1 : 0.1)}" /></label>`;
     })
     .join("");
   const numeric = (strategy.params || []).filter((spec) => spec.type !== "bool");
@@ -1122,6 +1123,23 @@ function download(filename, text) {
   URL.revokeObjectURL(link.href);
 }
 
+function exportEquity() {
+  const rows = state.result?.equity || [];
+  if (!rows.length) return showBanner("还没有净值可以下载。");
+  const cash = state.result.assumptions?.cash || Number($("cash").value);
+  const header = "date,strategy_equity,strategy_return,benchmark_equity,drawdown,position,close";
+  const lines = rows.map((row) => [
+    row.label,
+    row.equity.toFixed(2),
+    ((row.equity / cash - 1) * 100).toFixed(4) + "%",
+    row.bench == null ? "" : Number(row.bench).toFixed(2),
+    ((row.drawdown || 0) * 100).toFixed(4) + "%",
+    row.position,
+    row.close,
+  ].join(","));
+  download(`${state.symbol}-equity.csv`, [header, ...lines].join("\n"));
+}
+
 function exportTrades() {
   const trades = state.result?.trades || [];
   if (!trades.length) return showBanner("还没有成交可以下载。");
@@ -1292,6 +1310,7 @@ function bind() {
     showTab("robust");
   };
   $("sweepMode").onchange = applySweepMode;
+  $("sweepMetric").onchange = () => { if (state.heatmap) renderHeatmap(state.heatmap); };
   $("sweepParam2").onchange = () => {
     const spec = (currentStrategy()?.params || []).find((item) => item.key === $("sweepParam2").value);
     if (!spec) return;
@@ -1329,6 +1348,7 @@ function bind() {
       showBanner(error.message, "error");
     }
   };
+  $("exportEquity").onclick = exportEquity;
   $("exportTrades").onclick = exportTrades;
   $("exportMetrics").onclick = exportMetrics;
   document.addEventListener("keydown", (event) => {

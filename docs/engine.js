@@ -196,8 +196,8 @@ SmaCross.id = "sma_cross";
 SmaCross.name = "双均线";
 SmaCross.description = "短均线高于长均线就满仓，否则空仓。趋势来了跟得上，震荡市会被来回打脸。";
 SmaCross.paramsSchema = [
-  { key: "fast", label: "短均线", type: "int", default: 20, min: 2, max: 120, step: 1 },
-  { key: "slow", label: "长均线", type: "int", default: 60, min: 5, max: 300, step: 1 },
+  { key: "fast", label: "短均线", type: "int", default: 20, min: 2, max: 120, step: 1, hint: "短均线看最近多少根K线的平均价。越小信号越早，也越容易被噪音骗。" },
+  { key: "slow", label: "长均线", type: "int", default: 60, min: 5, max: 300, step: 1, hint: "长均线决定主要趋势。越大越稳，但进场越晚。" },
 ];
 
 class EmaCross extends Strategy {
@@ -259,8 +259,8 @@ BollingerReversion.id = "bollinger";
 BollingerReversion.name = "布林带回归";
 BollingerReversion.description = "收盘跌破下轨买入，回到中轨卖出。赌价格会回到均值；单边行情里会一直接飞刀。";
 BollingerReversion.paramsSchema = [
-  { key: "period", label: "周期", type: "int", default: 20, min: 5, max: 120, step: 1 },
-  { key: "k", label: "带宽倍数", type: "float", default: 2.0, min: 0.5, max: 4, step: 0.1 },
+  { key: "period", label: "周期", type: "int", default: 20, min: 5, max: 120, step: 1, hint: "布林带的回看根数。越长通道越宽，信号越少。" },
+  { key: "k", label: "带宽倍数", type: "float", default: 2.0, min: 0.5, max: 4, step: 0.1, hint: "上下轨离中轨多少个标准差。越大越极端，买入机会越少。" },
 ];
 
 class RsiReversion extends Strategy {
@@ -283,9 +283,9 @@ RsiReversion.id = "rsi";
 RsiReversion.name = "RSI 回归";
 RsiReversion.description = "RSI 低于超卖线买入，高于超买线卖出。阈值越极端，交易越少，错过的行情也越多。";
 RsiReversion.paramsSchema = [
-  { key: "period", label: "RSI 周期", type: "int", default: 14, min: 2, max: 60, step: 1 },
-  { key: "oversold", label: "超卖线", type: "float", default: 30, min: 5, max: 50, step: 1 },
-  { key: "overbought", label: "超买线", type: "float", default: 70, min: 50, max: 95, step: 1 },
+  { key: "period", label: "RSI 周期", type: "int", default: 14, min: 2, max: 60, step: 1, hint: "RSI 回看根数。越大对短期波动越不敏感。" },
+  { key: "oversold", label: "超卖线", type: "float", default: 30, min: 5, max: 50, step: 1, hint: "低于这个值买入。设得越低越保守。" },
+  { key: "overbought", label: "超买线", type: "float", default: 70, min: 50, max: 95, step: 1, hint: "高于这个值卖出。" },
 ];
 
 class DonchianBreakout extends Strategy {
